@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CampusAI — Grievance & Lost and Found</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+ <link rel="stylesheet" href="styles.css">
+<script src="script.js"></script>
+</head>
+<body>
+
+<div class="mesh"></div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"><span id="toastIcon">✅</span><span class="toast-msg" id="toastMsg"></span></div>
+
+<!-- SUCCESS MODAL -->
+<div class="modal-overlay" id="successModal">
+  <div class="modal">
+    <div class="modal-icon" id="modalIcon">🎉</div>
+    <h3 id="modalTitle">Submitted!</h3>
+    <p id="modalDesc">Your request has been submitted successfully.</p>
+    <div class="modal-ref" id="modalRef">REF-2025-XXXX</div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center" id="modalBtn" onclick="closeModal()">Continue</button>
+  </div>
+</div>
+
+<!-- DETAIL OVERLAY -->
+<div class="overlay" id="detailOverlay" onclick="closeDetailEvt(event)">
+  <div class="dp" id="detailPanel">
+    <div class="dp-hero grv-bg" id="dpHero">
+      📢
+      <button class="dp-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="dp-body" id="dpBody">
+      <!-- injected dynamically -->
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     SIDEBAR (Dashboard App)
+══════════════════════════════════════ -->
+<aside class="sidebar" id="appSidebar">
+  <a href="#" class="sidebar-logo" onclick="showPage('landing');return false;">
+    <div class="logo-chip">🎓</div>
+    <div class="logo-txt">Campus<span>AI</span></div>
+  </a>
+
+  <div class="sb-sec">
+    <div class="sb-lbl">Grievance</div>
+    <button class="nav-item" onclick="appView('grievances',this)"><span class="nav-icon">📢</span>All Grievances<span class="nb nb-red">6</span></button>
+    <button class="nav-item" onclick="appView('submit-grv',this)"><span class="nav-icon">✏️</span>Submit Grievance</button>
+    <button class="nav-item" onclick="appView('my-grv',this)"><span class="nav-icon">📋</span>My Grievances<span class="nb nb-blue">3</span></button>
+  </div>
+
+  <div class="sb-sec">
+    <div class="sb-lbl">Lost & Found</div>
+    <button class="nav-item" onclick="appView('lf-browse',this)"><span class="nav-icon">🗂️</span>Browse Items<span class="nb nb-red">23</span></button>
+    <button class="nav-item" onclick="appView('lf-post',this)"><span class="nav-icon">➕</span>Post Item</button>
+    <button class="nav-item" onclick="appView('lf-matches',this)"><span class="nav-icon">🤖</span>AI Matches<span class="nb nb-yellow">5</span></button>
+  </div>
+
+  <div class="sb-sec">
+    <div class="sb-lbl">System</div>
+    <button class="nav-item" onclick="appView('admin',this)"><span class="nav-icon">🛡️</span>Admin Panel</button>
+    <button class="nav-item" onclick="showToast('📊','Analytics — Phase 5!')"><span class="nav-icon">📊</span>Analytics</button>
+    <button class="nav-item" onclick="showToast('🤖','AI Chatbot — Phase 4!')"><span class="nav-icon">🤖</span>AI Chatbot</button>
+  </div>
+
+  <div class="sb-footer">
+    <div class="user-pill">
+      <div class="uav">RS</div>
+      <div><div class="u-name">Rahul Sharma</div><div class="u-role">Student · CSE</div></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ══════════════════════════════════════
+     MAIN AREA
+══════════════════════════════════════ -->
+<main class="main" id="appMain">
+
+  <!-- TOP BAR -->
+  <div class="topbar" id="appTopbar">
+    <div class="tb-l">
+      <h1 id="pageTitle">Dashboard</h1>
+      <p id="pageSub">Welcome back, Rahul!</p>
+    </div>
+    <div class="tb-r">
+      <div class="search-bar"><span>🔍</span><input type="text" placeholder="Search..." id="globalSearch" oninput="handleSearch(this.value)"/></div>
+      <div class="icon-btn">🔔<span class="ndot"></span></div>
+
+      <!-- THEME TOGGLE -->
+      <div class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">
+        <span class="icon-sun">☀️</span>
+        <span class="icon-moon">🌙</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- ══ GRIEVANCES LIST ══ -->
+    <div class="view" id="view-grievances">
+      <div class="kpi-row">
+        <div class="kpi-card kc-1"><div class="kpi-icon ki-o">📋</div><div class="kpi-val" style="color:var(--accent3)">14</div><div class="kpi-lbl">Pending</div><div class="kpi-trend t-up">↑ 12%</div></div>
+        <div class="kpi-card kc-2"><div class="kpi-icon ki-b">🔍</div><div class="kpi-val" style="color:var(--accent)">6</div><div class="kpi-lbl">In Review</div><div class="kpi-trend t-up">↑ 4%</div></div>
+        <div class="kpi-card kc-3"><div class="kpi-icon ki-g">✅</div><div class="kpi-val" style="color:var(--accent2)">47</div><div class="kpi-lbl">Resolved</div><div class="kpi-trend t-up">↑ 28%</div></div>
+        <div class="kpi-card kc-4"><div class="kpi-icon ki-p">⚡</div><div class="kpi-val" style="color:var(--purple)">2.4d</div><div class="kpi-lbl">Avg Resolution</div><div class="kpi-trend t-dn">↓ 2%</div></div>
+      </div>
+      <div class="sec-hdr"><div><h2>All Grievances</h2><p>67 total · Last updated just now</p></div><button class="btn btn-primary" onclick="appView('submit-grv',null)">✏️ New Grievance</button></div>
+      <div class="filter-row">
+        <button class="fc active" onclick="fChip(this)">All (67)</button>
+        <button class="fc" onclick="fChip(this)">Pending (14)</button>
+        <button class="fc" onclick="fChip(this)">In Review (6)</button>
+        <button class="fc" onclick="fChip(this)">Resolved (47)</button>
+        <button class="fc" onclick="fChip(this)">Escalated (2)</button>
+        <select class="sort-sel"><option>All Categories</option><option>Infrastructure</option><option>Academic</option><option>Hostel</option><option>Canteen</option></select>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>ID</th><th>Grievance</th><th>Category</th><th>Priority</th><th>Status</th><th>Assigned</th><th>Date</th><th>Action</th></tr></thead><tbody id="grvTable"></tbody></table></div>
+    </div>
+
+    <!-- ══ SUBMIT GRIEVANCE ══ -->
+    <div class="view" id="view-submit-grv">
+      <div class="steps-ind"><div class="s-dot done" id="sd1">1</div><div class="s-line done" id="sl1"></div><div class="s-dot cur" id="sd2">2</div><div class="s-line" id="sl2"></div><div class="s-dot" id="sd3">3</div></div>
+      <div class="s-labels"><div class="s-lbl active">Category</div><div class="s-lbl active">Details</div><div class="s-lbl">Review</div></div>
+      <div class="step-form active" id="sf1">
+        <div class="form-card"><div class="form-hdr"><h3>Choose Category</h3><p>Select the type that best matches your issue</p></div><div class="form-body"><div class="cat-grid" id="catGrid"></div></div></div>
+      </div>
+      <div class="step-form" id="sf2">
+        <div class="form-card"><div class="form-hdr"><h3>📢 Grievance Details</h3><p>Provide all relevant information</p></div>
+        <div class="form-body"><div class="form-grid">
+          <div><label class="f-lbl">Subject *</label><input type="text" class="f-inp" id="gTitle" placeholder="Brief title of your grievance"/></div>
+          <div><label class="f-lbl">Priority *</label><select class="f-sel" id="gPriority"><option value="">Select Priority</option><option value="low">🟢 Low</option><option value="medium">🟡 Medium</option><option value="high">🔴 High</option></select></div>
+          <div class="form-full"><label class="f-lbl">Description *</label><textarea class="f-area" id="gDesc" placeholder="Describe your grievance in detail..."></textarea></div>
+          <div><label class="f-lbl">Location</label><input type="text" class="f-inp" id="gLoc" placeholder="e.g. Block C, Room 204"/></div>
+          <div><label class="f-lbl">Date of Incident</label><input type="date" class="f-inp" id="gDate"/></div>
+          <div class="form-full"><label class="f-lbl">Attachments (Optional)</label><div class="upload-zone" onclick="showToast('📎','File picker coming!')"><div class="upload-icon">📎</div><div class="upload-txt">Drag files here or <span>browse</span></div><div class="upload-hint">JPG, PNG, PDF up to 10MB</div></div></div>
+          <div class="form-full"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:.85rem;color:var(--muted2);background:var(--surface2);padding:11px 13px;border-radius:8px;border:1px solid var(--border)"><input type="checkbox" id="gAnon" style="accent-color:var(--accent);width:15px;height:15px"/>Submit anonymously</label></div>
+        </div><div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px"><button class="btn btn-ghost" onclick="goPrev()">← Back</button><button class="btn btn-primary" onclick="goNext()">Review →</button></div></div></div>
+      </div>
+      <div class="step-form" id="sf3">
+        <div class="form-card"><div class="form-hdr"><h3>✅ Review & Submit</h3><p>Check your details before submitting</p></div>
+        <div class="form-body">
+          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:18px;margin-bottom:18px">
+            <div class="dp-field"><label>Category</label><span id="rv-cat">—</span></div>
+            <div class="dp-field"><label>Subject</label><span id="rv-title">—</span></div>
+            <div class="dp-field"><label>Priority</label><span id="rv-prio">—</span></div>
+            <div class="dp-field"><label>Location</label><span id="rv-loc">—</span></div>
+            <div class="dp-field" style="border:none"><label>Description</label></div>
+            <p id="rv-desc" style="font-size:.83rem;color:var(--muted2);line-height:1.6;margin-top:7px">—</p>
+          </div>
+          <div style="background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.14);border-radius:9px;padding:12px 15px;font-size:.8rem;color:var(--muted2);margin-bottom:22px;line-height:1.6">ℹ️ Once submitted, your grievance will be routed to the relevant department automatically.</div>
+          <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-ghost" onclick="goPrev()">← Edit</button><button class="btn btn-primary" onclick="submitGrv()">🚀 Submit Grievance</button></div>
+        </div></div>
+      </div>
+    </div>
+
+    <!-- ══ MY GRIEVANCES ══ -->
+    <div class="view" id="view-my-grv">
+      <div class="sec-hdr"><div><h2>My Grievances</h2><p>Submitted by you</p></div><button class="btn btn-primary" onclick="appView('submit-grv',null)">✏️ New</button></div>
+      <div id="myGrvList" style="display:flex;flex-direction:column;gap:12px"></div>
+    </div>
+
+    <!-- ══ LF BROWSE ══ -->
+    <div class="view" id="view-lf-browse">
+      <div class="kpi-row">
+        <div class="kpi-card kc-l"><div class="kpi-icon ki-r">🔴</div><div class="kpi-val" style="color:var(--lost)">23</div><div class="kpi-lbl">Lost Reports</div><div class="kpi-trend t-dn">↑ 3 this week</div></div>
+        <div class="kpi-card kc-f"><div class="kpi-icon ki-g">🟢</div><div class="kpi-val" style="color:var(--found)">18</div><div class="kpi-lbl">Found Items</div><div class="kpi-trend t-up">↓ 2 claimed</div></div>
+        <div class="kpi-card kc-m"><div class="kpi-icon ki-y">🤖</div><div class="kpi-val" style="color:var(--match)">5</div><div class="kpi-lbl">AI Matches</div><div class="kpi-trend t-up">↑ 2 new</div></div>
+        <div class="kpi-card kc-2"><div class="kpi-icon ki-b">✅</div><div class="kpi-val" style="color:var(--accent)">89</div><div class="kpi-lbl">Reunited</div><div class="kpi-trend t-up">↑ 12%</div></div>
+      </div>
+      <div class="ai-banner" onclick="appView('lf-matches',null)">
+        <div class="ai-icon-wrap">🤖</div>
+        <div><h4 style="font-family:'Syne',sans-serif;font-size:.92rem;font-weight:700;color:var(--match);margin-bottom:2px">🎯 AI found 5 potential matches!</h4><p style="font-size:.79rem;color:var(--muted2)">Your lost backpack may have been found — 87% confidence. Click to review.</p></div>
+        <span style="margin-left:auto;color:var(--match);font-size:20px">→</span>
+      </div>
+      <div class="sec-hdr">
+        <div><h2>All Items</h2><p id="lfItemCount">41 items · Updated now</p></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-lost btn-sm" onclick="appView('lf-post',null);selectType('lost')">+ Report Lost</button>
+          <button class="btn btn-found btn-sm" onclick="appView('lf-post',null);selectType('found')">+ I Found</button>
+        </div>
+      </div>
+      <div class="filter-row">
+        <button class="fc active" onclick="filterLF('all',this)">All</button>
+        <button class="fc fc-lost" onclick="filterLF('lost',this)">🔴 Lost</button>
+        <button class="fc fc-found" onclick="filterLF('found',this)">🟢 Found</button>
+        <button class="fc" onclick="fChip(this)">🎒 Bags</button>
+        <button class="fc" onclick="fChip(this)">📱 Electronics</button>
+        <button class="fc" onclick="fChip(this)">📄 Documents</button>
+        <select class="sort-sel"><option>Latest First</option><option>High Priority</option></select>
+      </div>
+      <div class="item-grid" id="lfGrid"></div>
+    </div>
+
+    <!-- ══ LF POST ══ -->
+    <div class="view" id="view-lf-post">
+      <div class="type-sel">
+        <div class="type-card sel-lost" id="typeLost" onclick="selectType('lost')"><div class="tc-icon">😢</div><h3 class="tc-title" style="color:var(--lost)">I Lost Something</h3><p class="tc-desc">Report an item you've lost. We'll alert people and scan for matches.</p></div>
+        <div class="type-card" id="typeFound" onclick="selectType('found')"><div class="tc-icon">😊</div><h3 class="tc-title" style="color:var(--found)">I Found Something</h3><p class="tc-desc">Post a found item. Help reunite it with its owner — earn good karma!</p></div>
+      </div>
+      <div class="form-card"><div class="form-hdr"><h3 id="lfFormTitle">📋 Report Lost Item</h3><p>Fill in details for better AI matching</p></div>
+      <div class="form-body"><div class="form-grid">
+        <div><label class="f-lbl">Item Name *</label><input type="text" class="f-inp" id="iTitle" placeholder="e.g. Blue Backpack, iPhone 14"/></div>
+        <div><label class="f-lbl">Category *</label><select class="f-sel" id="iCat"><option value="">Select Category</option><option>🎒 Bags & Accessories</option><option>📱 Electronics</option><option>📄 Documents / ID Cards</option><option>👕 Clothing</option><option>🔑 Keys</option><option>📚 Books / Stationery</option><option>📦 Other</option></select></div>
+        <div><label class="f-lbl">Color(s)</label><input type="text" class="f-inp" id="iColor" placeholder="e.g. Navy blue with red zipper"/></div>
+        <div><label class="f-lbl">Brand / Make</label><input type="text" class="f-inp" id="iBrand" placeholder="e.g. North Face, Apple"/></div>
+        <div class="form-full"><label class="f-lbl">Description *</label><textarea class="f-area" id="iDesc" placeholder="Describe the item — any unique marks, contents, damage..."></textarea></div>
+        <div class="form-full"><label class="f-lbl">Location</label><div class="loc-grid" id="locGrid"></div><input type="text" class="f-inp" id="iLocOther" placeholder="Or type a specific location..." style="margin-top:9px"/></div>
+        <div><label class="f-lbl" id="dateLbl">Date Lost *</label><input type="date" class="f-inp" id="iDate"/></div>
+        <div><label class="f-lbl">Time (Approx)</label><input type="time" class="f-inp" id="iTime"/></div>
+        <div class="form-full"><label class="f-lbl">Photos (up to 4)</label>
+          <div class="img-upload-grid">
+            <div class="img-slot has-img" onclick="showToast('📷','Replace photo')">🎒<span>Change</span></div>
+            <div class="img-slot" onclick="showToast('📷','Upload')">📷<span>Add Photo</span></div>
+            <div class="img-slot" onclick="showToast('📷','Upload')">📷<span>Add Photo</span></div>
+            <div class="img-slot" onclick="showToast('📷','Upload')">📷<span>Add Photo</span></div>
+          </div>
+        </div>
+        <div class="form-full"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:.85rem;color:var(--muted2);background:var(--surface2);padding:11px 13px;border-radius:8px;border:1px solid var(--border)"><input type="checkbox" style="accent-color:var(--accent);width:15px;height:15px"/>Keep my identity private</label></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn btn-ghost" onclick="appView('lf-browse',null)">Cancel</button>
+        <button class="btn btn-lost" id="lfSubmitBtn" onclick="submitLF()">🚀 Submit Lost Report</button>
+      </div></div></div>
+    </div>
+
+    <!-- ══ LF MATCHES ══ -->
+    <div class="view" id="view-lf-matches">
+      <div class="sec-hdr" style="margin-bottom:20px"><div><h2>🤖 AI Matches</h2><p>5 potential matches · Updated 2 min ago</p></div><button class="btn btn-ghost btn-sm" onclick="showToast('🔄','Re-scanning...')">🔄 Re-scan</button></div>
+      <div style="background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.14);border-radius:var(--radius);padding:14px 18px;margin-bottom:20px;font-size:.82rem;color:var(--muted2);line-height:1.6">🤖 <strong style="color:var(--text)">How AI Matching Works:</strong> Our AI analyzes descriptions, colors, categories, and location patterns to calculate confidence scores. Items above 70% are flagged for review.</div>
+      <div id="matchesList"></div>
+    </div>
+
+    <!-- ══ ADMIN PANEL ══ -->
+    <div class="view" id="view-admin">
+      <div class="sec-hdr"><div><h2>🛡️ Admin Panel</h2><p>Manage grievances & lost items</p></div><div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="showToast('📤','Exported!')">📤 Export</button><button class="btn btn-primary btn-sm" onclick="showToast('📧','Bulk notifications sent!')">📧 Notify All</button></div></div>
+      <div class="tbl-wrap" style="margin-bottom:20px">
+        <table><thead><tr><th>ID</th><th>Item / Grievance</th><th>Type</th><th>Student</th><th>Status</th><th>Actions</th></tr></thead><tbody id="adminTable"></tbody></table>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ══════════════════════════════════════
+     LANDING PAGE (outside main layout)
+══════════════════════════════════════ -->
+<div id="landingPage" style="display:none;width:100%;position:relative;z-index:1">
+  <!-- NAV -->
+  <nav style="position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:16px 44px;background:var(--bg);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);transition:all var(--transition)">
+    <a href="#" class="sidebar-logo" style="border:none;padding:0" onclick="return false">
+      <div class="logo-chip">🎓</div>
+      <div class="logo-txt">Campus<span>AI</span></div>
+    </a>
+    <div style="display:flex;align-items:center;gap:28px">
+      <a href="#features" style="color:var(--muted);text-decoration:none;font-size:.88rem;font-weight:500;transition:color .2s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">Features</a>
+      <a href="#how" style="color:var(--muted);text-decoration:none;font-size:.88rem;font-weight:500;transition:color .2s" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">How It Works</a>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <!-- THEME TOGGLE ON LANDING TOO -->
+      <div class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">
+        <span class="icon-sun">☀️</span>
+        <span class="icon-moon">🌙</span>
+      </div>
+      <button class="btn btn-ghost" onclick="showPage('login')">Sign In</button>
+      <button class="btn btn-primary" onclick="showPage('register')">Get Started</button>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-badge"><span class="pulsedot"></span>AI-Powered Campus Platform · Now Live</div>
+    <h1>Your Campus,<br/><span class="grad">Smarter & Fairer</span></h1>
+    <p>Submit grievances, track resolutions, report lost items, and get instant AI support — all in one unified campus platform.</p>
+    <div class="hero-actions">
+      <button class="btn btn-primary" style="padding:12px 28px;font-size:.98rem" onclick="showPage('register')">🚀 Get Started Free</button>
+      <button class="btn btn-ghost" style="padding:12px 28px;font-size:.98rem" onclick="showPage('login')">Sign In →</button>
+    </div>
+    <div class="stats-row">
+      <div class="stat"><div class="stat-num">2.4k+</div><div class="stat-lbl">Grievances Resolved</div></div>
+      <div class="stat"><div class="stat-num">890+</div><div class="stat-lbl">Items Reunited</div></div>
+      <div class="stat"><div class="stat-num">98%</div><div class="stat-lbl">Satisfaction Rate</div></div>
+      <div class="stat"><div class="stat-num">24/7</div><div class="stat-lbl">AI Support</div></div>
+    </div>
+    <div class="preview-wrap">
+      <div class="preview-bar"><span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span><div class="preview-url">campusai.edu/dashboard</div></div>
+      <div class="preview-body">
+        <div class="preview-sb">
+          <div class="psb-item active">📊 Dashboard</div>
+          <div class="psb-item">📢 Grievances</div>
+          <div class="psb-item">🔍 Lost & Found</div>
+          <div class="psb-item">🤖 AI Chatbot</div>
+        </div>
+        <div class="preview-main">
+          <div class="pkpi-row">
+            <div class="pkpi"><div class="pv" style="color:var(--accent3)">14</div><div class="pl">Pending</div></div>
+            <div class="pkpi"><div class="pv" style="color:var(--accent)">6</div><div class="pl">In Review</div></div>
+            <div class="pkpi"><div class="pv" style="color:var(--accent2)">47</div><div class="pl">Resolved</div></div>
+            <div class="pkpi"><div class="pv" style="color:var(--purple)">23</div><div class="pl">Lost Items</div></div>
+          </div>
+          <div class="ptable-row"><span style="flex:2;color:var(--text)">WiFi outage in Block C</span><span class="tag tag-review">In Review</span><span>IT Dept</span><span>2h ago</span></div>
+          <div class="ptable-row"><span style="flex:2;color:var(--text)">Lost: Blue backpack near Library</span><span class="tag tag-pending">Pending</span><span>Lost & Found</span><span>5h ago</span></div>
+          <div class="ptable-row"><span style="flex:2;color:var(--text)">Canteen food quality concern</span><span class="tag tag-resolved">Resolved</span><span>Admin</span><span>1d ago</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"></div>
+  <div class="section" id="features">
+    <div class="section-label">What we offer</div>
+    <h2 class="sec-title">Everything your campus needs</h2>
+    <p style="color:var(--muted2);font-size:.98rem;max-width:460px;line-height:1.7;margin-bottom:48px">From submitting a complaint to finding a lost item — all powered by intelligent AI that understands your campus.</p>
+    <div class="features-grid">
+      <div class="feat-card fc1"><div class="feat-icon fi-b">📢</div><h3>Grievance Redressal</h3><p>Submit complaints by category, set priority, and track real-time status with automated notifications.</p></div>
+      <div class="feat-card fc2"><div class="feat-icon fi-g">🔍</div><h3>Lost & Found</h3><p>Post lost or found items with photos. Our AI matches items automatically and notifies owners instantly.</p></div>
+      <div class="feat-card fc3"><div class="feat-icon fi-o">🤖</div><h3>AI Chatbot</h3><p>24/7 intelligent assistant helps you file grievances, find items, and answer campus FAQs.</p></div>
+      <div class="feat-card fc4"><div class="feat-icon fi-p">📊</div><h3>Admin Dashboard</h3><p>Real-time analytics on grievance trends, resolution times, and lost item statistics.</p></div>
+    </div>
+  </div>
+  <div class="divider"></div>
+  <div class="section" id="how" style="text-align:center">
+    <div class="section-label" style="text-align:center">Simple process</div>
+    <h2 class="sec-title">How It Works</h2>
+    <div style="margin-top:52px" class="steps-grid">
+      <div class="step"><div class="step-num">1</div><h4>Create Account</h4><p>Sign up with your college email. Instant verification and role assignment.</p></div>
+      <div class="step"><div class="step-num">2</div><h4>Submit Issue</h4><p>File a grievance or post a lost/found item with details and photos.</p></div>
+      <div class="step"><div class="step-num">3</div><h4>AI Assists</h4><p>Our AI categorizes, prioritizes, and routes your issue to the right team.</p></div>
+      <div class="step"><div class="step-num">4</div><h4>Get Resolved</h4><p>Track progress in real-time and get notified when resolved.</p></div>
+    </div>
+  </div>
+  <footer><div class="ft-left">© 2025 CampusAI. Built for smarter institutions.</div><div class="ft-links"><a href="#">Privacy</a><a href="#">Terms</a><a href="#">Support</a></div></footer>
+</div>
+
+<!-- ══════════════════════════════════════
+     LOGIN PAGE
+══════════════════════════════════════ -->
+<div id="loginPage" style="display:none;width:100%;position:relative;z-index:1">
+  <!-- mini nav -->
+  <nav style="position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:14px 36px;background:var(--bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);transition:all var(--transition)">
+    <a href="#" class="sidebar-logo" style="border:none;padding:0" onclick="showPage('landing');return false"><div class="logo-chip">🎓</div><div class="logo-txt">Campus<span>AI</span></div></a>
+    <div class="theme-toggle" onclick="toggleTheme()"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></div>
+  </nav>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-glow"></div>
+      <div class="sidebar-logo" style="border:none;padding:0;margin-bottom:26px"><div class="logo-chip">🎓</div><div class="logo-txt">Campus<span>AI</span></div></div>
+      <h2>Welcome back</h2>
+      <p class="subtitle">Sign in to your campus account</p>
+      <div class="role-toggle">
+        <button class="role-btn active" onclick="setRole(this)">👨‍🎓 Student</button>
+        <button class="role-btn" onclick="setRole(this)">🛡️ Admin / Staff</button>
+      </div>
+      <div class="succ-banner" id="loginSucc">✅ <span>Login successful! Redirecting...</span></div>
+      <div style="margin-bottom:16px"><label class="f-lbl">College Email</label><input type="email" class="f-inp" id="lEmail" placeholder="you@college.edu"/><div class="err-msg" id="lEmailErr">Enter a valid email</div></div>
+      <div style="margin-bottom:16px"><label class="f-lbl">Password</label><input type="password" class="f-inp" id="lPass" placeholder="Enter your password"/><div class="err-msg" id="lPassErr">Password is required</div></div>
+      <div class="form-footer"><label class="checkbox-wrap"><input type="checkbox"/>Remember me</label><a href="#" class="link">Forgot password?</a></div>
+      <button class="btn btn-primary btn-full" onclick="handleLogin()">Sign In →</button>
+      <div class="divider-txt">or continue with</div>
+      <button class="btn btn-google" onclick="showToast('🔄','Google Sign-In coming soon!')"><svg width="17" height="17" viewBox="0 0 18 18" fill="none"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>Continue with Google</button>
+      <div class="auth-switch">No account? <a href="#" class="link" onclick="showPage('register')">Sign Up</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     REGISTER PAGE
+══════════════════════════════════════ -->
+<div id="registerPage" style="display:none;width:100%;position:relative;z-index:1">
+  <nav style="position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:14px 36px;background:var(--bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);transition:all var(--transition)">
+    <a href="#" class="sidebar-logo" style="border:none;padding:0" onclick="showPage('landing');return false"><div class="logo-chip">🎓</div><div class="logo-txt">Campus<span>AI</span></div></a>
+    <div class="theme-toggle" onclick="toggleTheme()"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></div>
+  </nav>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-glow"></div>
+      <div class="sidebar-logo" style="border:none;padding:0;margin-bottom:26px"><div class="logo-chip">🎓</div><div class="logo-txt">Campus<span>AI</span></div></div>
+      <h2>Create account</h2>
+      <p class="subtitle">Join your campus platform today</p>
+      <div class="role-toggle">
+        <button class="role-btn active" onclick="setRegRole(this,'student')">👨‍🎓 Student</button>
+        <button class="role-btn" onclick="setRegRole(this,'staff')">🏫 Staff / Faculty</button>
+      </div>
+      <div class="succ-banner" id="regSucc">🎉 <span>Account created! Redirecting to login...</span></div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div><label class="f-lbl">First Name</label><input type="text" class="f-inp" id="rFirst" placeholder="Rahul"/><div class="err-msg" id="rFirstErr">Required</div></div>
+        <div><label class="f-lbl">Last Name</label><input type="text" class="f-inp" id="rLast" placeholder="Sharma"/></div>
+      </div>
+      <div style="margin-bottom:14px"><label class="f-lbl">College Email</label><input type="email" class="f-inp" id="rEmail" placeholder="you@college.edu"/><div class="err-msg" id="rEmailErr">Enter a valid college email</div></div>
+      <div style="margin-bottom:14px" id="rollWrap"><label class="f-lbl">Roll Number / Employee ID</label><input type="text" class="f-inp" id="rRoll" placeholder="21CS001"/></div>
+      <div style="margin-bottom:14px"><label class="f-lbl">Department</label><select class="f-sel" id="rDept"><option value="">Select Department</option><option>Computer Science</option><option>Information Technology</option><option>Electronics & Communication</option><option>Mechanical Engineering</option><option>Administration</option><option>Library</option></select></div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div><label class="f-lbl">Password</label><input type="password" class="f-inp" id="rPass" placeholder="Min 8 chars"/><div class="err-msg" id="rPassErr">Min 8 characters</div></div>
+        <div><label class="f-lbl">Confirm</label><input type="password" class="f-inp" id="rConfirm" placeholder="Re-enter"/><div class="err-msg" id="rConfErr">Passwords don't match</div></div>
+      </div>
+      <div style="margin-bottom:18px"><label class="checkbox-wrap"><input type="checkbox" id="rAgree" style="accent-color:var(--accent)"/>I agree to the <a href="#" class="link">Terms</a> & <a href="#" class="link">Privacy Policy</a></label><div class="err-msg" id="rAgreeErr">Please accept the terms</div></div>
+      <button class="btn btn-success btn-full" onclick="handleRegister()">Create Account 🎉</button>
+      <div class="divider-txt">or sign up with</div>
+      <button class="btn btn-google" onclick="showToast('🔄','Google Sign-Up coming soon!')"><svg width="17" height="17" viewBox="0 0 18 18" fill="none"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>Continue with Google</button>
+      <div class="auth-switch">Have an account? <a href="#" class="link" onclick="showPage('login')">Sign In</a></div>
+    </div>
+  </div>
+</div>
+
+
+</body>
+</html>
