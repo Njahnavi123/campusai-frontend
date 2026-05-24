@@ -6,6 +6,7 @@
 <title>CampusAI — Grievance & Lost and Found</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="/static/styles.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 /* ── Extra styles not in styles.css ── */
 .grv-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;cursor:pointer;transition:all .2s;}
@@ -34,12 +35,7 @@
 .typing-dots span:nth-child(2){animation-delay:.15s;}
 .typing-dots span:nth-child(3){animation-delay:.3s;}
 @keyframes bounce{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-7px)}}
-/* analytics bar chart */
-.bar-chart{display:flex;align-items:flex-end;gap:8px;height:140px;margin:16px 0;}
-.bar-col{display:flex;flex-direction:column;align-items:center;gap:5px;flex:1;}
-.bar{width:100%;border-radius:5px 5px 0 0;transition:height .5s ease;}
-.bar-lbl{font-size:.65rem;color:var(--muted);text-align:center;}
-.bar-val{font-size:.7rem;font-weight:700;color:var(--text);}
+@keyframes spin{to{transform:rotate(360deg)}}
 /* role-based CSS hiding */
 body[data-role="student"] .admin-only  {display:none!important;}
 body[data-role="admin"]   .student-only{display:none!important;}
@@ -65,6 +61,199 @@ body[data-role="guest"]   .student-only{display:none!important;}
   .topbar{padding:10px 14px!important;}
   .stats-row{gap:20px!important;}
   .steps-grid{grid-template-columns:1fr 1fr!important;}
+  #view-analytics .form-card + .form-card,
+  #view-analytics > div[style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important;}
+}
+/* chart container — ensures Chart.js respects the parent height */
+.chart-wrap{position:relative;width:100%;}
+
+/* ══════════════════════════════════════
+   MESSAGES DRAWER — slide-in panel
+══════════════════════════════════════ */
+
+/* Backdrop */
+#msgDrawerBackdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.45);
+  z-index:1100;opacity:0;pointer-events:none;
+  transition:opacity .28s ease;backdrop-filter:blur(3px);
+}
+#msgDrawerBackdrop.open{opacity:1;pointer-events:all;}
+
+/* Drawer shell — slides in from the right */
+#msgDrawer{
+  position:fixed;top:0;right:0;bottom:0;
+  width:min(780px,95vw);
+  background:var(--surface);
+  border-left:1px solid var(--border);
+  z-index:1101;
+  display:flex;flex-direction:column;
+  transform:translateX(100%);
+  transition:transform .3s cubic-bezier(.4,0,.2,1);
+  box-shadow:-8px 0 40px rgba(0,0,0,.28);
+}
+#msgDrawer.open{transform:translateX(0);}
+
+/* Drawer top bar */
+.mdr-topbar{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 18px;border-bottom:1px solid var(--border);
+  background:var(--surface);flex-shrink:0;
+}
+.mdr-topbar h3{
+  font-family:'Syne',sans-serif;font-size:1rem;
+  font-weight:700;color:var(--text);margin:0;flex:1;
+}
+.mdr-close{
+  background:none;border:none;color:var(--muted);
+  font-size:1.1rem;cursor:pointer;padding:4px 8px;
+  border-radius:6px;transition:background .15s,color .15s;
+}
+.mdr-close:hover{background:var(--surface2);color:var(--text);}
+.mdr-new-btn{
+  background:var(--accent);color:#fff;border:none;
+  border-radius:8px;padding:6px 13px;
+  font-size:.78rem;font-family:'DM Sans',sans-serif;
+  font-weight:600;cursor:pointer;transition:opacity .15s;
+  white-space:nowrap;
+}
+.mdr-new-btn:hover{opacity:.85;}
+
+/* Two-column inner layout */
+.mdr-body{
+  flex:1;display:grid;
+  grid-template-columns:260px 1fr;
+  overflow:hidden;min-height:0;
+}
+
+/* ── Left: thread list ── */
+.mdr-threads{
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.mdr-search{padding:9px 11px;border-bottom:1px solid var(--border);}
+.mdr-search input{
+  width:100%;padding:7px 10px;border-radius:8px;
+  background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);font-family:'DM Sans',sans-serif;
+  font-size:.8rem;outline:none;box-sizing:border-box;
+}
+.mdr-search input:focus{border-color:var(--accent);}
+#msgThreadList{flex:1;overflow-y:auto;}
+.msg-thread-item{
+  padding:12px 14px;border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background .14s;
+  display:flex;align-items:flex-start;gap:10px;
+}
+.msg-thread-item:hover{background:var(--surface2);}
+.msg-thread-item.active{
+  background:rgba(79,142,247,.1);
+  border-left:3px solid var(--accent);
+}
+.msg-thread-item.unread .mt-name{font-weight:700;color:var(--text);}
+.mt-avatar{
+  width:36px;height:36px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:700;color:#fff;flex-shrink:0;
+  font-family:'Syne',sans-serif;
+}
+.mt-info{flex:1;min-width:0;}
+.mt-row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;}
+.mt-name{font-size:.82rem;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mt-time{font-size:.68rem;color:var(--muted);flex-shrink:0;margin-left:5px;}
+.mt-preview{font-size:.74rem;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mt-badge{
+  background:var(--accent);color:#fff;border-radius:10px;
+  font-size:.62rem;font-weight:700;padding:1px 5px;
+  flex-shrink:0;margin-top:2px;
+}
+
+/* ── Right: active conversation ── */
+.mdr-convo{display:flex;flex-direction:column;overflow:hidden;}
+
+/* empty state */
+.mdr-empty{
+  flex:1;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  color:var(--muted);gap:10px;font-size:.88rem;
+}
+.mdr-empty-icon{font-size:2.6rem;}
+
+/* convo header */
+.mdr-convo-hdr{
+  padding:12px 16px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;
+  background:var(--surface);flex-shrink:0;
+}
+.mdr-convo-hdr-info{flex:1;}
+.mdr-convo-name{font-family:'Syne',sans-serif;font-size:.9rem;font-weight:700;color:var(--text);}
+.mdr-convo-sub {font-size:.72rem;color:var(--muted2);}
+
+/* ref tag */
+.msg-ref-tag{
+  background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.2);
+  border-radius:6px;padding:3px 8px;font-size:.7rem;color:var(--accent);
+  display:inline-flex;align-items:center;gap:4px;
+}
+
+/* bubbles */
+.mdr-msgs{
+  flex:1;overflow-y:auto;padding:16px;
+  display:flex;flex-direction:column;gap:10px;
+  background:var(--bg);
+}
+.msg-bubble-wrap{display:flex;align-items:flex-end;gap:7px;}
+.msg-bubble-wrap.me{flex-direction:row-reverse;}
+.msg-bubble{
+  padding:8px 12px;border-radius:13px;
+  font-size:.82rem;line-height:1.55;max-width:74%;
+}
+.msg-bubble-wrap.them .msg-bubble{
+  background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-bottom-left-radius:3px;
+}
+.msg-bubble-wrap.me .msg-bubble{
+  background:var(--accent);color:#fff;
+  border-bottom-right-radius:3px;
+}
+.msg-btime{font-size:.65rem;color:var(--muted);margin-bottom:2px;}
+
+/* compose */
+.mdr-compose{
+  padding:11px 14px;border-top:1px solid var(--border);
+  display:flex;gap:8px;background:var(--surface);flex-shrink:0;
+}
+.mdr-compose input{
+  flex:1;padding:8px 12px;border-radius:9px;
+  background:var(--surface2);border:1px solid var(--border);
+  color:var(--text);font-family:'DM Sans',sans-serif;
+  font-size:.84rem;outline:none;
+}
+.mdr-compose input:focus{border-color:var(--accent);}
+
+/* Floating trigger button (bottom-right of screen) */
+#msgFab{
+  position:fixed;bottom:28px;right:28px;z-index:1050;
+  width:52px;height:52px;border-radius:50%;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;box-shadow:0 6px 24px rgba(79,142,247,.45);
+  transition:transform .2s,box-shadow .2s;
+}
+#msgFab:hover{transform:scale(1.1);box-shadow:0 10px 32px rgba(79,142,247,.55);}
+#msgFabBadge{
+  position:absolute;top:-3px;right:-3px;
+  background:var(--lost);color:#fff;
+  border-radius:10px;font-size:.6rem;font-weight:700;
+  padding:1px 5px;display:none;border:2px solid var(--bg);
+}
+
+@media(max-width:600px){
+  #msgDrawer{width:100vw;}
+  .mdr-body{grid-template-columns:1fr;}
+  .mdr-threads{display:none;}
+  .mdr-threads.show{display:flex;position:absolute;inset:0;z-index:2;background:var(--surface);}
 }
 </style>
 </head>
@@ -78,6 +267,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
   window._loggedIn = {{ 'true' if logged_in else 'false' }};
   window._userRole = "{{ user_role }}";
   window._userName = "{{ user_name }}";
+  window._userId   = {{ user_id if user_id else 0 }};
   window._msgs     = {{ msgs | tojson }};
 </script>
 
@@ -103,6 +293,9 @@ body[data-role="guest"]   .student-only{display:none!important;}
   </div>
 </div>
 
+<!-- MESSAGE OVERLAY (for compose/new-message modal) -->
+<div id="msgOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:8000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(5px);padding:20px;"></div>
+
 <!-- ════════════════════════════════════
      SIDEBAR
 ════════════════════════════════════ -->
@@ -121,9 +314,8 @@ body[data-role="guest"]   .student-only{display:none!important;}
   </div>
   <div class="sb-sec student-only">
     <div class="sb-lbl">Lost & Found</div>
-    <button class="nav-item" data-view="lf-browse"  onclick="appView('lf-browse',this)"><span class="nav-icon">🗂️</span>Browse Items<span class="nb nb-red">23</span></button>
+    <button class="nav-item" data-view="lf-browse"  onclick="appView('lf-browse',this)"><span class="nav-icon">🗂️</span>Browse Items<span class="nb nb-red" id="nbLFItems">0</span></button>
     <button class="nav-item" data-view="lf-post"    onclick="appView('lf-post',this)"><span class="nav-icon">➕</span>Post Item</button>
-    <button class="nav-item" data-view="lf-matches" onclick="appView('lf-matches',this)"><span class="nav-icon">🤖</span>AI Matches<span class="nb nb-yellow">5</span></button>
   </div>
 
   <!-- ADMIN NAV -->
@@ -134,8 +326,8 @@ body[data-role="guest"]   .student-only{display:none!important;}
   </div>
   <div class="sb-sec admin-only">
     <div class="sb-lbl">Lost & Found</div>
-    <button class="nav-item" data-view="lf-browse"  onclick="appView('lf-browse',this)"><span class="nav-icon">🗂️</span>Browse Items<span class="nb nb-red">23</span></button>
-    <button class="nav-item" data-view="lf-matches" onclick="appView('lf-matches',this)"><span class="nav-icon">🤖</span>AI Matches<span class="nb nb-yellow">5</span></button>
+    <button class="nav-item" data-view="lf-browse"  onclick="appView('lf-browse',this)"><span class="nav-icon">🗂️</span>Browse Items<span class="nb nb-red" id="nbLFItemsAdmin">0</span></button>
+    <button class="nav-item" data-view="lf-matches" onclick="appView('lf-matches',this)"><span class="nav-icon">🤖</span>AI Matches</button>
   </div>
 
   <!-- SHARED NAV -->
@@ -143,6 +335,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
     <div class="sb-lbl">Tools</div>
     <button class="nav-item" data-view="analytics" onclick="appView('analytics',this)"><span class="nav-icon">📊</span>Analytics</button>
     <button class="nav-item" data-view="chatbot"   onclick="appView('chatbot',this)"><span class="nav-icon">🤖</span>AI Chatbot</button>
+    <button class="nav-item" onclick="openMsgDrawer()"><span class="nav-icon">💬</span>Messages<span class="nb nb-blue" id="nbMessages" style="display:none">0</span></button>
   </div>
 
   <div class="sb-footer">
@@ -169,24 +362,13 @@ body[data-role="guest"]   .student-only{display:none!important;}
     <div class="tb-r">
       <div class="search-bar"><span>🔍</span><input type="text" placeholder="Search…" id="globalSearch" oninput="handleSearch(this.value)"/></div>
       <div class="icon-btn" onclick="toggleNotifications()">
-
-    🔔
-
-    <span class="ndot"></span>
-
-</div>
-
-<div class="notif-panel" id="notifPanel">
-
-    <div class="notif-header">
-        Notifications
-    </div>
-
-    <div id="notifList">
-
-    </div>
-
-</div>
+        🔔
+        <span class="ndot"></span>
+      </div>
+      <div class="notif-panel" id="notifPanel">
+        <div class="notif-header">Notifications</div>
+        <div id="notifList"></div>
+      </div>
       <div class="theme-toggle" onclick="toggleTheme()"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></div>
     </div>
   </div>
@@ -274,21 +456,20 @@ body[data-role="guest"]   .student-only{display:none!important;}
 
     <!-- ── LF BROWSE (both roles) ── -->
     <div class="view" id="view-lf-browse">
-      <!-- Replace the existing kpi-row inside view-lf-browse with this -->
       <div class="kpi-row">
         <div class="kpi-card kc-l"><div class="kpi-icon ki-r">🔴</div><div class="kpi-val" style="color:var(--lost)" id="lfKpiLost">0</div><div class="kpi-lbl">Lost Reports</div><div class="kpi-trend t-dn">↑ 3 this week</div></div>
         <div class="kpi-card kc-f"><div class="kpi-icon ki-g">🟢</div><div class="kpi-val" style="color:var(--found)" id="lfKpiFound">0</div><div class="kpi-lbl">Found Items</div><div class="kpi-trend t-up">↓ 2 claimed</div></div>
-        <div class="kpi-card kc-m"><div class="kpi-icon ki-y">🤖</div><div class="kpi-val" style="color:var(--match)">5</div><div class="kpi-lbl">AI Matches</div><div class="kpi-trend t-up">↑ 2 new</div></div>
+        <div class="kpi-card kc-m"><div class="kpi-icon ki-y">🤖</div><div class="kpi-val" style="color:var(--match)" id="lfKpiMatches">—</div><div class="kpi-lbl">AI Matches</div><div class="kpi-trend t-up">↑ Live</div></div>
         <div class="kpi-card kc-2"><div class="kpi-icon ki-b">✅</div><div class="kpi-val" style="color:var(--accent)">89</div><div class="kpi-lbl">Reunited</div><div class="kpi-trend t-up">↑ 12%</div></div>
       </div>
-      <div class="ai-banner" onclick="appView('lf-matches',null)">
+      <div class="ai-banner" onclick="appView('lf-matches',document.querySelector('[data-view=\'lf-matches\']'))">
         <div class="ai-icon-wrap">🤖</div>
-        <div><h4 style="font-family:'Syne',sans-serif;font-size:.92rem;font-weight:700;color:var(--match);margin-bottom:2px">🎯 AI found 5 potential matches!</h4>
-          <p style="font-size:.79rem;color:var(--muted2)">Your lost backpack may have been found — 87% confidence.</p></div>
+        <div><h4 style="font-family:'Syne',sans-serif;font-size:.92rem;font-weight:700;color:var(--match);margin-bottom:2px" id="aiBannerTxt">🎯 AI Matching is live — click to view matches!</h4>
+          <p style="font-size:.79rem;color:var(--muted2)">TF-IDF + rule-based scoring across all open items.</p></div>
         <span style="margin-left:auto;color:var(--match);font-size:20px">→</span>
       </div>
       <div class="sec-hdr">
-        <div><h2>All Items</h2><p id="lfItemCount">6 items · Updated now</p></div>
+        <div><h2>All Items</h2><p id="lfItemCount">Loading…</p></div>
         <div style="display:flex;gap:8px" class="student-only">
           <button class="btn btn-lost btn-sm"  onclick="appView('lf-post',null);selectType('lost')">+ Report Lost</button>
           <button class="btn btn-found btn-sm" onclick="appView('lf-post',null);selectType('found')">+ I Found</button>
@@ -307,7 +488,6 @@ body[data-role="guest"]   .student-only{display:none!important;}
     </div>
 
     <!-- ── LF POST (student only) ── -->
-    <!-- ── LF POST (student only) ── -->
     <div class="view student-only" id="view-lf-post">
       <div class="type-sel">
         <div class="type-card sel-lost" id="typeLost" onclick="selectType('lost')"><div class="tc-icon">📝</div><h3 class="tc-title" style="color:var(--lost)">I Lost Something</h3><p class="tc-desc">Report an item you've lost.</p></div>
@@ -324,15 +504,13 @@ body[data-role="guest"]   .student-only{display:none!important;}
           <div><label class="f-lbl" id="dateLbl">Date Lost *</label><input type="date" class="f-inp" id="iDate"/></div>
           <div><label class="f-lbl">Time (Approx)</label><input type="time" class="f-inp" id="iTime"/></div>
 
-          <!-- ── Photo upload — shown ONLY for "found" items ── -->
-          <div class="form-full" id="lfPhotoSection" style="display:none;">
+          <div class="form-full" id="lfPhotoSection">
             <label class="f-lbl">
-              Photo of Item <span style="color:var(--lost);font-weight:700;">*</span>
-              <span style="font-size:.72rem;color:var(--muted);font-weight:400;margin-left:6px">(Required for found items)</span>
+              Photo of Item
+              <span id="lfPhotoReq" style="color:var(--lost);font-weight:700;display:none;"> *</span>
+              <span id="lfPhotoHint" style="font-size:.72rem;color:var(--muted);font-weight:400;margin-left:6px;">(Optional — helps with AI matching)</span>
             </label>
-            <!-- hidden real file input -->
-            <input type="file" id="lfFileInput" accept="image/*" style="display:none"
-              onchange="handleLFImageSelect(this)" />
+            <input type="file" id="lfFileInput" accept="image/*" style="display:none" onchange="handleLFImageSelect(this)" />
             <div class="img-upload-grid" style="margin-top:8px">
               <div class="img-slot" id="lfImgSlot"
                 onclick="document.getElementById('lfFileInput').click()"
@@ -343,9 +521,22 @@ body[data-role="guest"]   .student-only{display:none!important;}
             <div id="lfImagePreview"></div>
             <p style="font-size:.73rem;color:var(--muted);margin-top:6px">JPG / PNG / WebP · Max 5 MB</p>
           </div>
-          <!-- ── End photo section ── -->
 
-          <div class="form-full"><label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:.85rem;color:var(--muted2);background:var(--surface2);padding:11px 13px;border-radius:8px;border:1px solid var(--border)"><input type="checkbox" id="iPrivate" style="accent-color:var(--accent);width:15px;height:15px"/>Keep my identity private</label></div>
+          <div class="form-full" id="lfLockerSection" style="display:none">
+            <label class="f-lbl">
+              Found Item Deposited — Locker Number
+              <span style="font-size:.72rem;color:var(--muted);font-weight:400;margin-left:6px;">(Where you have kept the found item)</span>
+            </label>
+            <input type="text" class="f-inp" id="iLockerNumber" placeholder="e.g. Locker B-12, Library Block" style="margin-top:6px;"/>
+            <p style="font-size:.73rem;color:var(--muted);margin-top:5px;">🔐 This helps the owner collect their item from the right location.</p>
+          </div>
+
+          <div class="form-full">
+            <div style="display:flex;align-items:center;gap:9px;background:rgba(79,142,247,.06);padding:11px 13px;border-radius:8px;border:1px solid rgba(79,142,247,.15);font-size:.85rem;color:var(--muted2);">
+              🔒 <span>Your identity will be kept <strong style="color:var(--text)">anonymous</strong> — other users will never see your name.</span>
+            </div>
+            <input type="checkbox" id="iPrivate" checked style="display:none"/>
+          </div>
         </div>
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
           <button class="btn btn-ghost" onclick="appView('lf-browse',null)">Cancel</button>
@@ -353,12 +544,21 @@ body[data-role="guest"]   .student-only{display:none!important;}
         </div></div></div>
     </div>
 
-    <!-- ── LF MATCHES (both roles) ── -->
-    <div class="view" id="view-lf-matches">
-      <div class="sec-hdr" style="margin-bottom:20px"><div><h2>🤖 AI Matches</h2><p>5 potential matches · Updated 2 min ago</p></div>
-        <button class="btn btn-ghost btn-sm" onclick="showToast('🔄','Re-scanning…')">🔄 Re-scan</button></div>
-      <div style="background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.14);border-radius:var(--radius);padding:14px 18px;margin-bottom:20px;font-size:.82rem;color:var(--muted2);line-height:1.6">
-        🤖 <strong style="color:var(--text)">How AI Matching Works:</strong> Our AI analyzes descriptions, colors, categories and location patterns to calculate confidence scores. Items above 70% are flagged for review.</div>
+    <!-- ── LF MATCHES — LIVE ML (admin only) ── -->
+    <div class="view admin-only" id="view-lf-matches">
+      <div class="sec-hdr" style="margin-bottom:16px">
+        <div>
+          <h2>🤖 AI Matches</h2>
+          <p id="matchesSubHdr">Loading matches…</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadLFMatches()">🔄 Re-scan</button>
+      </div>
+      <div style="background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.14);border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;font-size:.82rem;color:var(--muted2);line-height:1.6">
+        🤖 <strong style="color:var(--text)">How AI Matching Works:</strong>
+        Uses <strong style="color:var(--accent)">TF-IDF cosine similarity</strong> on item titles &amp; descriptions combined with
+        rule-based scoring on category (20%), color (15%), date proximity (10%), and location (5%).
+        Items above the confidence threshold are shown below.
+      </div>
       <div id="matchesList"></div>
     </div>
 
@@ -377,35 +577,29 @@ body[data-role="guest"]   .student-only{display:none!important;}
 
     <!-- ── ANALYTICS (both roles) ── -->
     <div class="view" id="view-analytics">
-      <div class="sec-hdr"><div><h2>📊 Analytics</h2><p>Campus grievance & lost-item insights</p></div>
+      <div class="sec-hdr"><div><h2>📊 Analytics</h2><p>Campus grievance &amp; lost-item insights</p></div>
         <button class="btn btn-ghost btn-sm" onclick="showToast('📤','Report exported!')">📤 Export PDF</button>
       </div>
-      <!-- KPI row -->
+
+      <!-- KPI CARDS — all values filled from /api/analytics -->
       <div class="kpi-row" style="margin-bottom:28px">
-        <div class="kpi-card kc-1"><div class="kpi-icon ki-o">📋</div><div class="kpi-val" style="color:var(--accent3)" id="aPendingTotal">0</div><div class="kpi-lbl">Total Grievances</div><div class="kpi-trend t-up">↑ 8% this month</div></div>
-        <div class="kpi-card kc-3"><div class="kpi-icon ki-g">✅</div><div class="kpi-val" style="color:var(--accent2)">89%</div><div class="kpi-lbl">Resolution Rate</div><div class="kpi-trend t-up">↑ 3%</div></div>
-        <div class="kpi-card kc-l"><div class="kpi-icon ki-r">🔴</div><div class="kpi-val" style="color:var(--lost)">41</div><div class="kpi-lbl">Lost & Found</div><div class="kpi-trend t-up">↑ 5 this week</div></div>
-        <div class="kpi-card kc-4"><div class="kpi-icon ki-p">⚡</div><div class="kpi-val" style="color:var(--purple)">2.4d</div><div class="kpi-lbl">Avg Resolution</div><div class="kpi-trend t-dn">↓ 0.3d improved</div></div>
+        <div class="kpi-card kc-1"><div class="kpi-icon ki-o">📋</div><div class="kpi-val" style="color:var(--accent3)" id="aPendingTotal">—</div><div class="kpi-lbl">Total Grievances</div><div class="kpi-trend t-up">Live</div></div>
+        <div class="kpi-card kc-3"><div class="kpi-icon ki-g">✅</div><div class="kpi-val" style="color:var(--accent2)" id="aResRateVal">—</div><div class="kpi-lbl">Resolution Rate</div><div class="kpi-trend t-up">Live</div></div>
+        <div class="kpi-card kc-l"><div class="kpi-icon ki-r">🔴</div><div class="kpi-val" style="color:var(--lost)" id="aLFTotalVal">—</div><div class="kpi-lbl">Lost &amp; Found</div><div class="kpi-trend t-up">Live</div></div>
+        <div class="kpi-card kc-4"><div class="kpi-icon ki-p">⚡</div><div class="kpi-val" style="color:var(--purple)" id="aAvgRes">—</div><div class="kpi-lbl">Avg Resolution</div><div class="kpi-trend t-dn">Days</div></div>
       </div>
-      <!-- Charts row -->
+
+      <!-- ROW 1: Status Doughnut + Category Bar -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+
+        <!-- Status Breakdown -->
         <div class="form-card">
-          <div class="form-hdr"><h3>Grievances by Category</h3><p>Last 30 days</p></div>
+          <div class="form-hdr"><h3>Status Breakdown</h3><p>Live from database</p></div>
           <div class="form-body">
-            <div class="bar-chart">
-              <div class="bar-col"><div class="bar-val">18</div><div class="bar" style="height:90px;background:linear-gradient(180deg,var(--accent),rgba(79,142,247,.4))"></div><div class="bar-lbl">Infra</div></div>
-              <div class="bar-col"><div class="bar-val">14</div><div class="bar" style="height:70px;background:linear-gradient(180deg,var(--accent2),rgba(56,226,184,.4))"></div><div class="bar-lbl">Academic</div></div>
-              <div class="bar-col"><div class="bar-val">11</div><div class="bar" style="height:55px;background:linear-gradient(180deg,var(--accent3),rgba(247,147,79,.4))"></div><div class="bar-lbl">Hostel</div></div>
-              <div class="bar-col"><div class="bar-val">9</div><div class="bar" style="height:45px;background:linear-gradient(180deg,var(--purple),rgba(167,139,250,.4))"></div><div class="bar-lbl">Canteen</div></div>
-              <div class="bar-col"><div class="bar-val">7</div><div class="bar" style="height:35px;background:linear-gradient(180deg,var(--lost),rgba(247,95,95,.4))"></div><div class="bar-lbl">Medical</div></div>
-              <div class="bar-col"><div class="bar-val">8</div><div class="bar" style="height:40px;background:linear-gradient(180deg,var(--match),rgba(247,195,79,.4))"></div><div class="bar-lbl">Others</div></div>
+            <div class="chart-wrap" style="height:200px;margin-bottom:16px">
+              <canvas id="chartStatus"></canvas>
             </div>
-          </div>
-        </div>
-        <div class="form-card">
-          <div class="form-hdr"><h3>Status Breakdown</h3><p>Current snapshot</p></div>
-          <div class="form-body">
-            <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
+            <div style="display:flex;flex-direction:column;gap:10px">
               <div>
                 <div style="display:flex;justify-content:space-between;font-size:.78rem;margin-bottom:5px"><span style="color:var(--muted)">Resolved</span><span style="font-weight:700;color:var(--found)" id="aResPct">—</span></div>
                 <div class="prog-bar"><div class="prog-fill" id="aResBar" style="width:0%;background:linear-gradient(90deg,var(--found),var(--accent2))"></div></div>
@@ -425,16 +619,57 @@ body[data-role="guest"]   .student-only{display:none!important;}
             </div>
           </div>
         </div>
+
+        <!-- Grievances by Category — horizontal bar chart, 100% DB-driven -->
+        <div class="form-card">
+          <div class="form-hdr"><h3>Grievances by Category</h3><p>Live from database</p></div>
+          <div class="form-body">
+            <div class="chart-wrap" style="height:300px">
+              <canvas id="chartCategories"></canvas>
+            </div>
+          </div>
+        </div>
       </div>
-      <!-- Lost & Found stats -->
+
+      <!-- ROW 2: Monthly Trend (full width) -->
+      <div class="form-card" style="margin-bottom:20px">
+        <div class="form-hdr"><h3>Monthly Trend</h3><p>Submissions vs resolutions — last 6 months</p></div>
+        <div class="form-body">
+          <div class="chart-wrap" style="height:220px">
+            <canvas id="chartMonthly"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 3: Priority Pie + Assignee Workload -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+        <div class="form-card">
+          <div class="form-hdr"><h3>Priority Distribution</h3><p>Low / Medium / High</p></div>
+          <div class="form-body">
+            <div class="chart-wrap" style="height:220px">
+              <canvas id="chartPriority"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="form-card">
+          <div class="form-hdr"><h3>Assignee Workload</h3><p>Open cases per team</p></div>
+          <div class="form-body">
+            <div class="chart-wrap" style="height:220px">
+              <canvas id="chartAssignees"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 4: Lost & Found Overview — all DB-driven -->
       <div class="form-card">
-        <div class="form-hdr"><h3>Lost & Found Overview</h3><p>Item tracking statistics</p></div>
+        <div class="form-hdr"><h3>Lost &amp; Found Overview</h3><p>Live item tracking statistics</p></div>
         <div class="form-body">
           <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;text-align:center">
-            <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--lost)">23</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Lost Reports</div></div>
-            <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--found)">18</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Found Reports</div></div>
-            <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--match)">5</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">AI Matches</div></div>
-            <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--accent)">89</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Items Reunited</div></div>
+            <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--lost)" id="aLostCount">—</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Lost Reports</div></div>
+            <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--found)" id="aFoundCount">—</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Found Reports</div></div>
+            <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--match)" id="aMatchCount">—</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Claimed Items</div></div>
+            <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--accent)" id="aAutoEsc">—</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Auto-Escalated</div></div>
           </div>
         </div>
       </div>
@@ -470,8 +705,103 @@ body[data-role="guest"]   .student-only{display:none!important;}
       </div>
     </div>
 
-  </div>
+    <!-- ══════════════════════════════════════
+         (Messages is now a slide-in drawer,
+          not a view — see #msgDrawer below)
+    ══════════════════════════════════════ -->
+
+  </div><!-- /.content -->
 </main>
+
+<!-- ════════════════════════════════════
+     MESSAGES DRAWER + FAB
+════════════════════════════════════ -->
+
+<!-- Backdrop -->
+<div id="msgDrawerBackdrop" onclick="closeMsgDrawer()"></div>
+
+<!-- Drawer panel -->
+<div id="msgDrawer">
+
+  <!-- Top bar -->
+  <div class="mdr-topbar">
+    <h3>💬 Messages</h3>
+    <span id="msgUnreadCount" style="font-size:.72rem;color:var(--muted);margin-right:auto;padding-left:8px"></span>
+    <button class="mdr-new-btn" onclick="openNewMessageModal()">✏️ New</button>
+    <button class="mdr-close" onclick="closeMsgDrawer()" title="Close">✕</button>
+  </div>
+
+  <!-- Body: threads + convo -->
+  <div class="mdr-body">
+
+    <!-- LEFT: thread list -->
+    <div class="mdr-threads" id="mdrThreads">
+      <div class="mdr-search">
+        <input type="text" id="msgSearchInput"
+               placeholder="Search conversations…"
+               oninput="filterMsgThreads(this.value)"/>
+      </div>
+      <div id="msgThreadList">
+        <div style="text-align:center;padding:40px 14px;color:var(--muted);font-size:.82rem"
+             id="msgThreadPlaceholder">
+          Loading conversations…
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: active conversation -->
+    <div class="mdr-convo" id="mdrConvo">
+
+      <!-- Empty state -->
+      <div class="mdr-empty" id="msgEmptyState">
+        <div class="mdr-empty-icon">💬</div>
+        <div style="font-weight:600;color:var(--text)">No conversation selected</div>
+        <div style="font-size:.78rem;color:var(--muted);text-align:center;max-width:200px;line-height:1.5">
+          Pick a thread on the left, or start a new message.
+        </div>
+        <button class="mdr-new-btn" onclick="openNewMessageModal()">✏️ New Message</button>
+      </div>
+
+      <!-- Active thread -->
+      <div id="msgActiveThread" style="display:none;flex-direction:column;height:100%">
+
+        <!-- Header -->
+        <div class="mdr-convo-hdr">
+          <div class="mt-avatar" id="msgActiveAvatar">?</div>
+          <div class="mdr-convo-hdr-info">
+            <div class="mdr-convo-name" id="msgActiveName">—</div>
+            <div class="mdr-convo-sub"  id="msgActiveSub">—</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="refreshActiveThread()" title="Refresh">🔄</button>
+        </div>
+
+        <!-- Linked-item tag -->
+        <div id="msgRefTagWrap" style="padding:7px 16px 0;display:none">
+          <span class="msg-ref-tag" id="msgRefTag">🔗 Linked: —</span>
+        </div>
+
+        <!-- Bubbles -->
+        <div class="mdr-msgs" id="msgBody"></div>
+
+        <!-- Compose -->
+        <div class="mdr-compose">
+          <input type="text" id="msgComposeInput"
+                 placeholder="Type a message… (Enter to send)"
+                 onkeydown="msgComposeKeydown(event)"/>
+          <button class="btn btn-primary btn-sm" onclick="sendMsgReply()">Send ➤</button>
+        </div>
+
+      </div><!-- /#msgActiveThread -->
+    </div><!-- /.mdr-convo -->
+
+  </div><!-- /.mdr-body -->
+</div><!-- /#msgDrawer -->
+
+<!-- Floating action button -->
+<button id="msgFab" onclick="openMsgDrawer()" title="Open Messages">
+  💬
+  <span id="msgFabBadge">0</span>
+</button>
 
 <!-- ════════════════════════════════════
      LANDING PAGE
@@ -492,7 +822,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
 
   <section class="hero">
     <div class="hero-badge"><span class="pulsedot"></span>AI-Powered Campus Platform · Now Live</div>
-    <h1>Your Campus,<br/><span class="grad">Smarter & Fairer</span></h1>
+    <h1>Your Campus,<br/><span class="grad">Smarter &amp; Fairer</span></h1>
     <p>Submit grievances, track resolutions, report lost items, and get instant AI support — all in one unified campus platform.</p>
     <div class="hero-actions">
       <button class="btn btn-primary" style="padding:12px 28px;font-size:.98rem" onclick="showPage('register')">🚀 Get Started Free</button>
@@ -507,7 +837,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
     <div class="preview-wrap">
       <div class="preview-bar"><span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span><div class="preview-url">campusai.edu/dashboard</div></div>
       <div class="preview-body">
-        <div class="preview-sb"><div class="psb-item active">📊 Dashboard</div><div class="psb-item">📢 Grievances</div><div class="psb-item">🔍 Lost & Found</div><div class="psb-item">🤖 AI Chatbot</div></div>
+        <div class="preview-sb"><div class="psb-item active">📊 Dashboard</div><div class="psb-item">📢 Grievances</div><div class="psb-item">🔍 Lost &amp; Found</div><div class="psb-item">🤖 AI Chatbot</div></div>
         <div class="preview-main">
           <div class="pkpi-row">
             <div class="pkpi"><div class="pv" style="color:var(--accent3)">14</div><div class="pl">Pending</div></div>
@@ -516,7 +846,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
             <div class="pkpi"><div class="pv" style="color:var(--purple)">23</div><div class="pl">Lost Items</div></div>
           </div>
           <div class="ptable-row"><span style="flex:2;color:var(--text)">WiFi outage in Block C</span><span class="tag tag-review">In Review</span><span>IT Dept</span><span>2h ago</span></div>
-          <div class="ptable-row"><span style="flex:2;color:var(--text)">Lost: Blue backpack</span><span class="tag tag-pending">Pending</span><span>Lost & Found</span><span>5h ago</span></div>
+          <div class="ptable-row"><span style="flex:2;color:var(--text)">Lost: Blue backpack</span><span class="tag tag-pending">Pending</span><span>Lost &amp; Found</span><span>5h ago</span></div>
           <div class="ptable-row"><span style="flex:2;color:var(--text)">Canteen food quality</span><span class="tag tag-resolved">Resolved</span><span>Admin</span><span>1d ago</span></div>
         </div>
       </div>
@@ -530,7 +860,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
     <p style="color:var(--muted2);font-size:.98rem;max-width:460px;line-height:1.7;margin-bottom:48px">Powered by intelligent AI that understands your campus.</p>
     <div class="features-grid">
       <div class="feat-card fc1"><div class="feat-icon fi-b">📢</div><h3>Grievance Redressal</h3><p>Submit complaints by category, set priority, and track real-time status.</p></div>
-      <div class="feat-card fc2"><div class="feat-icon fi-g">🔍</div><h3>Lost & Found</h3><p>Post lost or found items with photos. AI matches items and notifies owners.</p></div>
+      <div class="feat-card fc2"><div class="feat-icon fi-g">🔍</div><h3>Lost &amp; Found</h3><p>Post lost or found items with photos. AI matches items and notifies owners.</p></div>
       <div class="feat-card fc3"><div class="feat-icon fi-o">🤖</div><h3>AI Chatbot</h3><p>24/7 assistant helps you file grievances, find items, and answer FAQs.</p></div>
       <div class="feat-card fc4"><div class="feat-icon fi-p">📊</div><h3>Analytics Dashboard</h3><p>Real-time analytics on grievance trends and lost item statistics.</p></div>
     </div>
@@ -585,11 +915,6 @@ body[data-role="guest"]   .student-only{display:none!important;}
         </div>
         <button type="button" class="btn btn-primary btn-full" onclick="handleLogin()">Sign In →</button>
       </form>
-      <div class="divider-txt">or continue with</div>
-      <button class="btn btn-google" onclick="googleSignIn('login')">
-        <svg width="17" height="17" viewBox="0 0 18 18" fill="none"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
-        Continue with Google
-      </button>
       <div class="auth-switch">No account? <a href="#" class="link" onclick="showPage('register')">Sign Up</a></div>
     </div>
   </div>
@@ -632,21 +957,64 @@ body[data-role="guest"]   .student-only{display:none!important;}
           <div><label class="f-lbl">Confirm</label><input type="password" class="f-inp" id="rConfirm" name="confirm_password" placeholder="Re-enter"/><div class="err-msg" id="rConfErr">Passwords don't match</div></div>
         </div>
         <div style="margin-bottom:18px">
-          <label class="checkbox-wrap"><input type="checkbox" id="rAgree" style="accent-color:var(--accent)"/>I agree to the <a href="#" class="link">Terms</a> & <a href="#" class="link">Privacy Policy</a></label>
+          <label class="checkbox-wrap"><input type="checkbox" id="rAgree" style="accent-color:var(--accent)"/>I agree to the <a href="#" class="link">Terms</a> &amp; <a href="#" class="link">Privacy Policy</a></label>
           <div class="err-msg" id="rAgreeErr">Please accept the terms</div>
         </div>
         <button type="button" class="btn btn-success btn-full" onclick="handleRegister()">Create Account 🎉</button>
       </form>
-      <div class="divider-txt">or sign up with</div>
-      <button class="btn btn-google" onclick="googleSignIn('register')">
-        <svg width="17" height="17" viewBox="0 0 18 18" fill="none"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
-        Continue with Google
-      </button>
       <div class="auth-switch">Have an account? <a href="#" class="link" onclick="showPage('login')">Sign In</a></div>
     </div>
   </div>
 </div>
 
 <script src="/static/script.js"></script>
+<script>
+/* ── Messages Drawer helpers ──
+   openMsgDrawer() / closeMsgDrawer() are called from the FAB,
+   the sidebar nav button, and any "Message" button on LF cards.
+   They load threads via the existing loadMessageThreads() in script.js
+   (or gracefully no-op if that function isn't defined yet).
+*/
+function openMsgDrawer(opts) {
+  document.getElementById('msgDrawer').classList.add('open');
+  document.getElementById('msgDrawerBackdrop').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  // Load threads if the function exists in script.js
+  if (typeof loadMessageThreads === 'function') loadMessageThreads();
+  // If a specific thread ref was passed (e.g. from a LF card), open it
+  if (opts && opts.threadId && typeof openMsgThread === 'function') {
+    openMsgThread(opts.threadId);
+  }
+  // If a pre-filled recipient was passed (new message context)
+  if (opts && opts.to && typeof openNewMessageModal === 'function') {
+    openNewMessageModal(opts);
+  }
+}
+
+function closeMsgDrawer() {
+  document.getElementById('msgDrawer').classList.remove('open');
+  document.getElementById('msgDrawerBackdrop').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+// Close on Escape key
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeMsgDrawer();
+});
+
+// Show/hide FAB badge from unread count
+function updateMsgFabBadge(count) {
+  const badge = document.getElementById('msgFabBadge');
+  if (!badge) return;
+  if (count && count > 0) {
+    badge.textContent = count > 99 ? '99+' : count;
+    badge.style.display = 'block';
+    const nb = document.getElementById('nbMessages');
+    if (nb) { nb.textContent = count; nb.style.display = 'inline-flex'; }
+  } else {
+    badge.style.display = 'none';
+  }
+}
+</script>
 </body>
 </html>
