@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import sqlite3
 import bcrypt
 import os
@@ -5,7 +7,13 @@ import base64
 import uuid
 import threading
 import time
+import time as _time
+import re as _re
 from datetime import datetime, timedelta
+
+import json
+import urllib.request
+import urllib.error
 
 from flask import (
     Flask, render_template, request,
@@ -16,7 +24,7 @@ from flask import (
 from matcher import find_matches, find_matches_for_item
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "campusai_secret_2025")
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
 
 ADMIN_EMAIL    = "admin@campusai.edu"
 ADMIN_PASSWORD = "admin123"
@@ -316,6 +324,48 @@ def login():
 
     session['msgs'] = [('error_login','Invalid email or password.')]
     return redirect('/')
+
+
+# ─── FORGOT PASSWORD ───────────────────────────────────────
+@app.route('/api/forgot_password', methods=['POST'])
+def forgot_password():
+    data  = request.get_json(force=True, silent=True) or {}
+    email = data.get('email', '').strip().lower()
+    if not email:
+        return jsonify(ok=False, error='Email is required.'), 400
+
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT id, first_name FROM users WHERE email=?", (email,))
+    user = cur.fetchone()
+
+    if user:
+        token   = str(uuid.uuid4())
+        expires = (datetime.utcnow() + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id    INTEGER NOT NULL,
+                    token      TEXT    NOT NULL,
+                    expires_at TEXT    NOT NULL,
+                    used       INTEGER DEFAULT 0
+                )
+            """)
+            cur.execute("DELETE FROM password_resets WHERE user_id=?", (user['id'],))
+            cur.execute(
+                "INSERT INTO password_resets (user_id, token, expires_at) VALUES (?,?,?)",
+                (user['id'], token, expires)
+            )
+            conn.commit()
+        except Exception as e:
+            conn.close()
+            return jsonify(ok=False, error='Database error. Please try again.'), 500
+        # In production, email the link: /reset_password?token={token}
+        print(f"[RESET] Password reset token for {email}: {token}")
+
+    conn.close()
+    # Always respond ok to prevent email enumeration
+    return jsonify(ok=True)
 
 
 # ─── SUBMIT GRIEVANCE ──────────────────────────────────────
@@ -673,7 +723,7 @@ def api_analytics():
 
 
 # ══════════════════════════════════════════════════════════════
-# ANONYMOUS MESSAGING SYSTEM  ── FIXED
+# ANONYMOUS MESSAGING SYSTEM
 # ══════════════════════════════════════════════════════════════
 
 def _make_thread_id(user_a, user_b, lf_item_id):
@@ -692,6 +742,8 @@ def send_message():
     """
     if 'user_id' not in session:
         return jsonify({'error': 'Login required'}), 401
+    if session.get('user_role') == 'admin':
+        return jsonify({'error': 'Admins cannot send messages'}), 403
 
     data       = request.get_json() or {}
     lf_item_id = data.get('lf_item_id')
@@ -705,7 +757,6 @@ def send_message():
     sender_id = session['user_id']
     conn = get_db(); cur = conn.cursor()
 
-    # Look up the item — receiver is always the item owner
     cur.execute("SELECT user_id, title, type FROM lost_found WHERE id=?", (lf_item_id,))
     item = cur.fetchone()
     if not item:
@@ -717,23 +768,16 @@ def send_message():
         conn.close()
         return jsonify({'error': 'You cannot message yourself'}), 400
 
-    # Build deterministic thread_id
     thread_id = _make_thread_id(sender_id, receiver_id, lf_item_id)
 
-    # Check if thread already exists — if so, just add the message (no duplicate thread)
-    cur.execute(
-        "SELECT id FROM messages WHERE thread_id = ? LIMIT 1",
-        (thread_id,)
-    )
+    cur.execute("SELECT id FROM messages WHERE thread_id = ? LIMIT 1", (thread_id,))
     thread_exists = cur.fetchone() is not None
 
-    # Insert the message
     cur.execute("""
         INSERT INTO messages (thread_id, sender_id, receiver_id, lf_item_id, body)
         VALUES (?, ?, ?, ?, ?)
     """, (thread_id, sender_id, receiver_id, lf_item_id, body))
 
-    # Only notify the receiver if this is a brand-new thread
     if not thread_exists:
         item_type  = item['type']
         item_title = item['title']
@@ -753,12 +797,11 @@ def send_message():
 
 @app.route('/api/messages/reply', methods=['POST'])
 def reply_message():
-    """
-    Send a reply within an existing thread.
-    Body: { thread_id, body }
-    """
+    """Send a reply within an existing thread. Body: { thread_id, body }"""
     if 'user_id' not in session:
         return jsonify({'error': 'Login required'}), 401
+    if session.get('user_role') == 'admin':
+        return jsonify({'error': 'Admins cannot send messages'}), 403
 
     data      = request.get_json() or {}
     thread_id = (data.get('thread_id') or '').strip()
@@ -772,7 +815,6 @@ def reply_message():
     sender_id = session['user_id']
     conn = get_db(); cur = conn.cursor()
 
-    # Verify sender belongs to this thread and get the other participant
     cur.execute("""
         SELECT sender_id, receiver_id, lf_item_id FROM messages
         WHERE thread_id = ? AND (sender_id = ? OR receiver_id = ?)
@@ -783,7 +825,6 @@ def reply_message():
         conn.close()
         return jsonify({'error': 'Thread not found or access denied'}), 404
 
-    # The receiver of THIS reply is the other participant
     if existing['sender_id'] == sender_id:
         receiver_id = existing['receiver_id']
     else:
@@ -796,7 +837,6 @@ def reply_message():
         VALUES (?, ?, ?, ?, ?)
     """, (thread_id, sender_id, receiver_id, lf_item_id, body))
 
-    # Notify the receiver of the reply
     cur.execute("SELECT title, type FROM lost_found WHERE id=?", (lf_item_id,))
     item_row = cur.fetchone()
     if item_row:
@@ -815,10 +855,7 @@ def reply_message():
 
 @app.route('/api/messages/threads')
 def list_threads():
-    """
-    List all message threads for the current user.
-    FIXED: removed the broken CASE direction column that caused GROUP BY issues.
-    """
+    """List all message threads for the current user."""
     if 'user_id' not in session:
         return jsonify([])
 
@@ -856,7 +893,6 @@ def get_thread(thread_id):
     uid  = session['user_id']
     conn = get_db(); cur = conn.cursor()
 
-    # Verify user belongs to this thread
     cur.execute("""
         SELECT id FROM messages
         WHERE thread_id = ? AND (sender_id = ? OR receiver_id = ?)
@@ -866,13 +902,11 @@ def get_thread(thread_id):
         conn.close()
         return jsonify({'error': 'Thread not found'}), 404
 
-    # Mark all messages received by this user in this thread as read
     cur.execute("""
         UPDATE messages SET is_read = 1
         WHERE thread_id = ? AND receiver_id = ?
     """, (thread_id, uid))
 
-    # Fetch messages — 'me' or 'them' author label (never expose real identity)
     cur.execute("""
         SELECT m.id, m.body, m.created_at, m.is_read,
                CASE WHEN m.sender_id = ? THEN 'me' ELSE 'them' END AS author,
@@ -883,7 +917,6 @@ def get_thread(thread_id):
     """, (uid, thread_id))
     messages = [dict(r) for r in cur.fetchall()]
 
-    # Fetch item context for the chat header
     item = {}
     if messages:
         cur.execute("""
@@ -1155,11 +1188,323 @@ def api_lf_status(item_id):
     return jsonify({'ok': True})
 
 
+# ─── API: GET PROFILE ───────────────────────────────────────
+@app.route('/api/profile')
+def api_get_profile():
+    if 'user_id' not in session or session.get('user_role') != 'student':
+        return jsonify({'error': 'Login required'}), 401
+    uid  = session['user_id']
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT first_name, last_name, email, roll, department FROM users WHERE id=?", (uid,))
+    row = cur.fetchone(); conn.close()
+    if not row:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify(dict(row))
+
+
+# ─── API: UPDATE PROFILE ────────────────────────────────────
+@app.route('/api/profile/update', methods=['POST'])
+def api_update_profile():
+    if 'user_id' not in session or session.get('user_role') != 'student':
+        return jsonify({'error': 'Login required'}), 401
+    uid  = session['user_id']
+    data = request.get_json() or {}
+
+    first_name = (data.get('first_name') or '').strip()
+    last_name  = (data.get('last_name')  or '').strip()
+    roll       = (data.get('roll')       or '').strip()
+    department = (data.get('department') or '').strip()
+
+    if not first_name:
+        return jsonify({'error': 'First name is required'}), 400
+
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("""
+        UPDATE users SET first_name=?, last_name=?, roll=?, department=?
+        WHERE id=?
+    """, (first_name, last_name, roll, department, uid))
+    conn.commit(); conn.close()
+
+    session['user_name'] = first_name
+    return jsonify({'ok': True, 'first_name': first_name})
+
+
+# ─── API: CHANGE PASSWORD ────────────────────────────────────
+@app.route('/api/profile/change_password', methods=['POST'])
+def api_change_password():
+    if 'user_id' not in session or session.get('user_role') != 'student':
+        return jsonify({'error': 'Login required'}), 401
+    uid  = session['user_id']
+    data = request.get_json() or {}
+
+    current_pw  = (data.get('current_password')  or '')
+    new_pw      = (data.get('new_password')       or '')
+    confirm_pw  = (data.get('confirm_password')   or '')
+
+    if len(new_pw) < 8:
+        return jsonify({'error': 'New password must be at least 8 characters'}), 400
+    if new_pw != confirm_pw:
+        return jsonify({'error': 'New passwords do not match'}), 400
+
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT password FROM users WHERE id=?", (uid,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'User not found'}), 404
+
+    stored = row['password']
+    if isinstance(stored, str): stored = stored.encode()
+    if not bcrypt.checkpw(current_pw.encode(), stored):
+        conn.close()
+        return jsonify({'error': 'Current password is incorrect'}), 403
+
+    new_hashed = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt())
+    cur.execute("UPDATE users SET password=? WHERE id=?", (new_hashed, uid))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True})
+
+
+# ═══════════════════════════════════════════════════════════════
+#  CHATBOT ROUTE
+# ═══════════════════════════════════════════════════════════════
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Login required'}), 401
+
+    data     = request.get_json() or {}
+    messages = data.get('messages', [])
+    if not messages:
+        return jsonify({'error': 'No messages provided'}), 400
+
+    user_question = messages[-1].get('content', '').strip()
+
+    # ── Live DB stats ──────────────────────────────────────────
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS c FROM grievances WHERE status='pending'")
+    stat_pending = cur.fetchone()['c']
+    cur.execute("SELECT COUNT(*) AS c FROM grievances WHERE status='resolved'")
+    stat_resolved = cur.fetchone()['c']
+    cur.execute("SELECT COUNT(*) AS c FROM grievances WHERE status='escalated'")
+    stat_escalated = cur.fetchone()['c']
+    cur.execute("SELECT COUNT(*) AS c FROM grievances")
+    stat_total = cur.fetchone()['c']
+    cur.execute("SELECT COUNT(*) AS c FROM lost_found WHERE type='lost' AND status='open'")
+    stat_lost = cur.fetchone()['c']
+    cur.execute("SELECT COUNT(*) AS c FROM lost_found WHERE type='found' AND status='open'")
+    stat_found = cur.fetchone()['c']
+    cur.execute("SELECT COUNT(*) AS c FROM lost_found WHERE status='claimed'")
+    stat_claimed = cur.fetchone()['c']
+    cur.execute("""SELECT category, COUNT(*) AS c FROM grievances
+                   WHERE category != '' GROUP BY category ORDER BY c DESC LIMIT 1""")
+    top_row = cur.fetchone()
+    top_cat = top_row['category'] if top_row else 'None yet'
+    conn.close()
+
+    user_name = session.get('user_name', 'Student')
+    user_role = session.get('user_role', 'student')
+
+    # ── Try Gemini with retry on quota/busy errors ─────────────
+    gemini_key = os.environ.get('GEMINI_API_KEY', '')
+    if gemini_key:
+        system_prompt = f"""You are CampusAI Assistant, a friendly AI built into a college campus management system.
+You help students and staff with grievances, lost & found, campus facilities, and general campus life.
+
+LIVE DATABASE STATS:
+- Total grievances: {stat_total} | Pending: {stat_pending} | Resolved: {stat_resolved} | Escalated: {stat_escalated}
+- Open lost reports: {stat_lost} | Unclaimed found items: {stat_found} | Successfully matched: {stat_claimed}
+- Most reported category: {top_cat}
+- Auto-escalation after: {ESCALATION_DAYS} days pending
+
+CAMPUS LOCATIONS: Library, Canteen, Administrative Building, Auditorium, Principal Office,
+University Examination Branch, J Hub, CSE/ECE/EEE/Civil/Mechanical/Chemical Departments,
+CRC, Hostel, Sports Complex.
+
+GRIEVANCE CATEGORIES: Infrastructure/IT, Academic, Hostel, Canteen/Food, Transport,
+Medical/Health, Fee/Finance, Harassment/Conduct, Sports/Facilities, Administration.
+
+USER: {user_name} ({user_role})
+
+RULES:
+- Be warm, concise, helpful. Max 120 words unless detail is truly needed.
+- Use the live stats above when asked — never make up numbers.
+- Use simple markdown: **bold** for key terms, bullet points for lists.
+- If asked about a specific grievance ID you cannot access, say so and direct them to the dashboard.
+- Politely redirect off-topic questions back to campus matters.
+"""
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel(
+                model_name='gemini-1.5-flash',
+                system_instruction=system_prompt,
+            )
+
+            # Build conversation history
+            history = []
+            for msg in messages[:-1]:
+                role = 'model' if msg['role'] == 'assistant' else 'user'
+                history.append({'role': role, 'parts': [msg['content']]})
+
+            # Retry up to 2 times on quota/busy errors
+            last_err = None
+            for attempt in range(2):
+                try:
+                    chat     = model.start_chat(history=history)
+                    response = chat.send_message(user_question)
+                    return jsonify({
+                        'ok':     True,
+                        'reply':  response.text.strip(),
+                        'engine': 'gemini'
+                    })
+                except Exception as e:
+                    last_err  = str(e).lower()
+                    # Only retry on quota/busy errors
+                    if any(x in last_err for x in ['quota', 'resource', '429', 'busy', 'exhausted']):
+                        if attempt == 0:
+                            _time.sleep(2)   # wait 2 seconds then retry once
+                        continue
+                    else:
+                        break   # non-quota error — don't retry, go to fallback
+
+            print(f'[chatbot] Gemini failed after retries: {last_err} — using local fallback')
+
+        except Exception as e:
+            print(f'[chatbot] Gemini setup error: {e} — using local fallback')
+
+    # ── Local fallback: TF-IDF + keyword rules ─────────────────
+    return _local_chatbot(
+        user_question,
+        stat_pending, stat_resolved, stat_escalated,
+        stat_lost, stat_found, stat_claimed
+    )
+
+
+# ── LOCAL CHATBOT ENGINE ───────────────────────────────────────
+_QA_PAIRS = [
+    (["how do i submit a grievance", "how to file a complaint", "raise a complaint",
+      "submit grievance", "new grievance", "file a grievance", "how do i complain"],
+     "To submit a grievance:\n1. Click **✏️ Submit Grievance** in the sidebar\n2. Pick your category\n3. Fill in subject, description, location and date\n4. Hit Submit — you'll get a reference number.\nTrack it anytime under **My Grievances**."),
+
+    (["track grievance", "check grievance status", "where is my complaint",
+      "grievance update", "my grievance", "status of my complaint"],
+     "Go to **My Grievances** in the sidebar. Statuses:\n• **Pending** — waiting for admin\n• **In Review** — being worked on\n• **Resolved** — done!\n• **Escalated** — auto-escalated after too long"),
+
+    (["what is escalation", "auto escalate", "when does grievance escalate",
+      "escalation policy", "escalated grievance"],
+     f"If a grievance stays **Pending** for more than **{ESCALATION_DAYS} days**, it is automatically escalated to senior administration. You'll get a notification."),
+
+    (["how to report lost item", "i lost something", "lost my bag", "report lost",
+      "lost item", "missing item"],
+     "Go to **Lost & Found → Post an Item**, select **Lost**, fill in details like category, color, location and date. Our AI scans found items for matches automatically."),
+
+    (["how to report found item", "i found something", "found item",
+      "report found", "found a bag"],
+     "Go to **Lost & Found → Post an Item**, select **Found**, upload a photo (required), add locker number if stored. AI checks for matching lost reports instantly."),
+
+    (["how does ai matching work", "ai matches", "how are items matched",
+      "matching algorithm", "tfidf", "gemini matching"],
+     "The matcher uses:\n• **TF-IDF text similarity** on titles & descriptions\n• **Rule-based scoring** for color, category, location, date\n• **Gemini Vision** to compare photos visually\nMatches above 35% appear in the AI Matches panel."),
+
+    (["anonymous message", "contact poster", "message the owner",
+      "send message", "anonymous chat"],
+     "Click **I Found It** or **I Lost It** on any item. A private chat opens — **neither person ever sees the other's identity**."),
+
+    (["hostel problem", "hostel complaint", "warden", "room issue"],
+     "Submit under **Hostel** category → goes to **Hostel Warden** / **Hostel Management**. Include room/block details."),
+
+    (["canteen complaint", "food problem", "bad food", "cafeteria"],
+     "Use **Canteen / Food** category → **Food Committee** reviews it. Mention date, time and specific issue."),
+
+    (["wifi", "internet", "network issue", "computer lab", "it problem"],
+     "Submit under **Infrastructure / IT** → **IT Department** / **Network Team** assigned. Include location and time."),
+
+    (["fee problem", "payment issue", "finance complaint", "accounts"],
+     "Use **Fee / Finance** category → **Finance Office** / **Accounts Department** handle it."),
+
+    (["medical", "health", "doctor", "sick", "clinic"],
+     "Submit under **Medical / Health** → **Medical Center** / **Campus Doctor**. For emergencies, visit directly."),
+
+    (["harassment", "ragging", "bullying", "posh", "misconduct"],
+     "Submit under **Harassment / Conduct** → **Grievance Cell**, **Dean of Students**, **POSH Committee**. Fully confidential."),
+
+    (["transport", "bus complaint", "shuttle", "vehicle"],
+     "Use **Transport** category → **Transport Office** / **Fleet Manager**. Mention route and time."),
+
+    (["sports", "ground", "gym", "sports complex"],
+     "Use **Sports / Facilities** → **Sports Department** / **Facilities Manager**."),
+
+    (["admin complaint", "principal", "registrar"],
+     "Use **Administration** category → **Admin Office** / **Principal Office** / **Registrar**."),
+
+    (["how many grievances", "total grievances", "stats", "pending count",
+      "statistics", "dashboard"],
+     None),  # filled dynamically
+
+    (["hello", "hi", "hey", "good morning", "help me", "what can you do"],
+     "Hi! 👋 I'm **CampusAI Assistant**. I can help with:\n• **Grievances** — submit, track, escalation\n• **Lost & Found** — report, AI matching, anonymous chat\n• **Campus info** — departments, locations, policies\n\nWhat do you need?"),
+
+    (["thank you", "thanks", "great", "helpful"],
+     "You're welcome! 😊 Let me know if you need anything else."),
+
+    (["bye", "goodbye", "see you"],
+     "Goodbye! 👋 Come back anytime."),
+]
+
+def _local_chatbot(question, pending, resolved, escalated, lost, found, claimed):
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+        import re
+
+        def _clean(t):
+            return re.sub(r'[^\w\s]', ' ', (t or '').lower()).strip()
+
+        q_clean      = _clean(question)
+        all_examples = []
+        pair_index   = []
+
+        for i, (examples, _) in enumerate(_QA_PAIRS):
+            for ex in examples:
+                all_examples.append(_clean(ex))
+                pair_index.append(i)
+
+        vec  = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
+        mat  = vec.fit_transform(all_examples + [q_clean])
+        sims = cosine_similarity(mat[-1], mat[:-1])[0]
+
+        best_ex_idx = int(sims.argmax())
+        best_score  = float(sims[best_ex_idx])
+        qa_idx      = pair_index[best_ex_idx]
+        answer      = _QA_PAIRS[qa_idx][1]
+
+        # Dynamic stats answer
+        if answer is None:
+            answer = (
+                f"**Live campus stats right now:**\n"
+                f"• Grievances — {pending} pending, {resolved} resolved, {escalated} escalated\n"
+                f"• Lost & Found — {lost} lost reports open, {found} found items waiting, {claimed} matched"
+            )
+
+        if best_score >= 0.12:
+            return jsonify({'ok': True, 'reply': answer, 'engine': 'local'})
+
+    except Exception as e:
+        print(f'[chatbot] local engine error: {e}')
+
+    return jsonify({'ok': True, 'reply': (
+        "I'm not sure about that. Try asking:\n"
+        "• *How do I submit a grievance?*\n"
+        "• *How does AI matching work?*\n"
+        "• *How many pending grievances are there?*"
+    ), 'engine': 'fallback'})
 # ─── LOGOUT ─────────────────────────────────────────────────
 @app.route('/logout')
 def logout():
     session.clear()
-    session['msgs'] = [('info','You have been logged out.')]
+    session['msgs'] = [('info', 'You have been logged out.')]
     return redirect('/')
 
 
