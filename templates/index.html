@@ -307,6 +307,10 @@ body[data-role="guest"]   .student-only{display:none!important;}
 
   <!-- STUDENT NAV -->
   <div class="sb-sec student-only">
+    <div class="sb-lbl">Account</div>
+    <button class="nav-item" data-view="profile" onclick="appView('profile',this)"><span class="nav-icon">👤</span>My Profile</button>
+  </div>
+  <div class="sb-sec student-only">
     <div class="sb-lbl">Grievance</div>
     <button class="nav-item" data-view="grievances" onclick="appView('grievances',this)"><span class="nav-icon">📢</span>All Grievances<span class="nb nb-red" id="nbAllGrv">0</span></button>
     <button class="nav-item" data-view="submit-grv" onclick="appView('submit-grv',this)"><span class="nav-icon">✏️</span>Submit Grievance</button>
@@ -316,6 +320,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
     <div class="sb-lbl">Lost & Found</div>
     <button class="nav-item" data-view="lf-browse"  onclick="appView('lf-browse',this)"><span class="nav-icon">🗂️</span>Browse Items<span class="nb nb-red" id="nbLFItems">0</span></button>
     <button class="nav-item" data-view="lf-post"    onclick="appView('lf-post',this)"><span class="nav-icon">➕</span>Post Item</button>
+    <!-- AI Matches removed for students — admin only -->
   </div>
 
   <!-- ADMIN NAV -->
@@ -335,7 +340,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
     <div class="sb-lbl">Tools</div>
     <button class="nav-item" data-view="analytics" onclick="appView('analytics',this)"><span class="nav-icon">📊</span>Analytics</button>
     <button class="nav-item" data-view="chatbot"   onclick="appView('chatbot',this)"><span class="nav-icon">🤖</span>AI Chatbot</button>
-    <button class="nav-item" onclick="openMsgDrawer()"><span class="nav-icon">💬</span>Messages<span class="nb nb-blue" id="nbMessages" style="display:none">0</span></button>
+    <button class="nav-item student-only" onclick="openMsgDrawer()"><span class="nav-icon">💬</span>Messages<span class="nb nb-blue" id="nbMessages" style="display:none">0</span></button>
   </div>
 
   <div class="sb-footer">
@@ -363,11 +368,15 @@ body[data-role="guest"]   .student-only{display:none!important;}
       <div class="search-bar"><span>🔍</span><input type="text" placeholder="Search…" id="globalSearch" oninput="handleSearch(this.value)"/></div>
       <div class="icon-btn" onclick="toggleNotifications()">
         🔔
-        <span class="ndot"></span>
+        <span class="notif-badge" id="notifBadge" style="display:none"></span>
       </div>
       <div class="notif-panel" id="notifPanel">
-        <div class="notif-header">Notifications</div>
+        <div class="notif-header" id="notifPanelHeader">Notifications</div>
         <div id="notifList"></div>
+      </div>
+      <!-- Profile icon — student-only in topbar -->
+      <div class="icon-btn student-only" id="topbarProfileBtn" onclick="appView('profile',document.querySelector('[data-view=\'profile\']'))" title="My Profile" style="position:relative">
+        <div id="topbarProfileAvatar" style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-size:.8rem;font-weight:800;color:#fff;cursor:pointer;border:2px solid rgba(79,142,247,.35);transition:border-color .2s;">?</div>
       </div>
       <div class="theme-toggle" onclick="toggleTheme()"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></div>
     </div>
@@ -386,6 +395,14 @@ body[data-role="guest"]   .student-only{display:none!important;}
       <div class="sec-hdr">
         <div><h2>All Grievances</h2><p id="grvTotal">0 total · Last updated just now</p></div>
         <button class="btn btn-primary student-only" onclick="appView('submit-grv',null)">✏️ New Grievance</button>
+      </div>
+      <!-- Grievance free-text search -->
+      <div class="grv-search-wrap">
+        <span class="grv-search-icon">🔍</span>
+        <input type="text" class="grv-search-inp" id="grvSearchInput"
+               placeholder="Search grievances by subject or description…"
+               oninput="filterGrvSearch(this.value)" />
+        <button class="grv-search-clear" id="grvSearchClear" onclick="clearGrvSearch()" style="display:none">✕</button>
       </div>
       <div class="filter-row">
         <button class="fc active" onclick="filterGrv('all',this)">All</button>
@@ -427,17 +444,28 @@ body[data-role="guest"]   .student-only{display:none!important;}
               <input type="hidden" name="category" id="selectedCategory">
               <div class="form-grid">
                 <div class="form-full"><label class="f-lbl">Selected Category</label><input type="text" class="f-inp" id="categoryDisplay" readonly></div>
-                <div class="form-full"><label class="f-lbl">Subject *</label><input type="text" class="f-inp" name="subject" placeholder="Brief title of your grievance" required></div>
-                <div class="form-full"><label class="f-lbl">Description *</label><textarea class="f-area" name="description" placeholder="Describe your grievance in detail…" required></textarea></div>
+                <div class="form-full"><label class="f-lbl">Subject *</label><input type="text" class="f-inp" name="subject" id="gSubject" placeholder="Brief title of your grievance" required></div>
+                <div class="form-full"><label class="f-lbl">Description *</label><textarea class="f-area" name="description" id="gDescription" placeholder="Describe your grievance in detail…" required></textarea></div>
                 <div><label class="f-lbl">Location</label><input type="text" class="f-inp" name="location" placeholder="e.g. Block C, Room 204"></div>
                 <div><label class="f-lbl">Date of Incident</label><input type="date" class="f-inp" name="incident_date" id="gDate"></div>
               </div>
+
+              <!-- Duplicate warning banner (hidden by default) -->
+              <div id="grvDuplicateWarn" style="display:none;margin-top:14px;border-radius:10px;border:1px solid rgba(247,195,79,.35);background:rgba(247,195,79,.08);padding:14px 16px;">
+                <div style="font-size:.84rem;font-weight:700;color:#f7c34f;margin-bottom:6px;">⚠️ Similar grievance already exists</div>
+                <div id="grvDuplicateText" style="font-size:.8rem;color:var(--muted2);margin-bottom:10px;"></div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <button type="button" class="btn btn-sm" style="background:rgba(247,195,79,.15);color:#f7c34f;border:1px solid rgba(247,195,79,.4);font-weight:600;" onclick="upvoteExistingGrievance()">👍 Upvote existing grievance</button>
+                  <button type="button" class="btn btn-ghost btn-sm" onclick="submitGrievanceAnyway()">Submit anyway →</button>
+                </div>
+              </div>
+
               <div style="background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.14);border-radius:8px;padding:11px 14px;margin-top:12px;font-size:.8rem;color:var(--muted2)">
                 ℹ️ Priority will be assessed and assigned by the admin team after review.
               </div>
               <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
                 <button type="button" class="btn btn-ghost" onclick="goPrev()">← Back</button>
-                <button type="submit" class="btn btn-primary">🚀 Submit Grievance</button>
+                <button type="button" class="btn btn-primary" id="grvSubmitBtn" onclick="checkGrievanceDuplicate()">🚀 Submit Grievance</button>
               </div>
             </form>
           </div>
@@ -462,7 +490,8 @@ body[data-role="guest"]   .student-only{display:none!important;}
         <div class="kpi-card kc-m"><div class="kpi-icon ki-y">🤖</div><div class="kpi-val" style="color:var(--match)" id="lfKpiMatches">—</div><div class="kpi-lbl">AI Matches</div><div class="kpi-trend t-up">↑ Live</div></div>
         <div class="kpi-card kc-2"><div class="kpi-icon ki-b">✅</div><div class="kpi-val" style="color:var(--accent)">89</div><div class="kpi-lbl">Reunited</div><div class="kpi-trend t-up">↑ 12%</div></div>
       </div>
-      <div class="ai-banner" onclick="appView('lf-matches',document.querySelector('[data-view=\'lf-matches\']'))">
+      <!-- AI banner — admin only -->
+      <div class="ai-banner admin-only" onclick="appView('lf-matches',document.querySelector('[data-view=\'lf-matches\']'))">
         <div class="ai-icon-wrap">🤖</div>
         <div><h4 style="font-family:'Syne',sans-serif;font-size:.92rem;font-weight:700;color:var(--match);margin-bottom:2px" id="aiBannerTxt">🎯 AI Matching is live — click to view matches!</h4>
           <p style="font-size:.79rem;color:var(--muted2)">TF-IDF + rule-based scoring across all open items.</p></div>
@@ -524,10 +553,11 @@ body[data-role="guest"]   .student-only{display:none!important;}
 
           <div class="form-full" id="lfLockerSection" style="display:none">
             <label class="f-lbl">
-              Found Item Deposited — Locker Number
+              Found Item Deposited — Locker Number <span style="color:var(--lost);font-weight:700">*</span>
               <span style="font-size:.72rem;color:var(--muted);font-weight:400;margin-left:6px;">(Where you have kept the found item)</span>
             </label>
             <input type="text" class="f-inp" id="iLockerNumber" placeholder="e.g. Locker B-12, Library Block" style="margin-top:6px;"/>
+            <div class="err-msg" id="iLockerErr">Locker number is required for found items</div>
             <p style="font-size:.73rem;color:var(--muted);margin-top:5px;">🔐 This helps the owner collect their item from the right location.</p>
           </div>
 
@@ -544,7 +574,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
         </div></div></div>
     </div>
 
-    <!-- ── LF MATCHES — LIVE ML (admin only) ── -->
+    <!-- ── LF MATCHES — ADMIN ONLY ── -->
     <div class="view admin-only" id="view-lf-matches">
       <div class="sec-hdr" style="margin-bottom:16px">
         <div>
@@ -581,7 +611,6 @@ body[data-role="guest"]   .student-only{display:none!important;}
         <button class="btn btn-ghost btn-sm" onclick="showToast('📤','Report exported!')">📤 Export PDF</button>
       </div>
 
-      <!-- KPI CARDS — all values filled from /api/analytics -->
       <div class="kpi-row" style="margin-bottom:28px">
         <div class="kpi-card kc-1"><div class="kpi-icon ki-o">📋</div><div class="kpi-val" style="color:var(--accent3)" id="aPendingTotal">—</div><div class="kpi-lbl">Total Grievances</div><div class="kpi-trend t-up">Live</div></div>
         <div class="kpi-card kc-3"><div class="kpi-icon ki-g">✅</div><div class="kpi-val" style="color:var(--accent2)" id="aResRateVal">—</div><div class="kpi-lbl">Resolution Rate</div><div class="kpi-trend t-up">Live</div></div>
@@ -589,10 +618,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
         <div class="kpi-card kc-4"><div class="kpi-icon ki-p">⚡</div><div class="kpi-val" style="color:var(--purple)" id="aAvgRes">—</div><div class="kpi-lbl">Avg Resolution</div><div class="kpi-trend t-dn">Days</div></div>
       </div>
 
-      <!-- ROW 1: Status Doughnut + Category Bar -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-
-        <!-- Status Breakdown -->
         <div class="form-card">
           <div class="form-hdr"><h3>Status Breakdown</h3><p>Live from database</p></div>
           <div class="form-body">
@@ -620,7 +646,6 @@ body[data-role="guest"]   .student-only{display:none!important;}
           </div>
         </div>
 
-        <!-- Grievances by Category — horizontal bar chart, 100% DB-driven -->
         <div class="form-card">
           <div class="form-hdr"><h3>Grievances by Category</h3><p>Live from database</p></div>
           <div class="form-body">
@@ -631,7 +656,6 @@ body[data-role="guest"]   .student-only{display:none!important;}
         </div>
       </div>
 
-      <!-- ROW 2: Monthly Trend (full width) -->
       <div class="form-card" style="margin-bottom:20px">
         <div class="form-hdr"><h3>Monthly Trend</h3><p>Submissions vs resolutions — last 6 months</p></div>
         <div class="form-body">
@@ -641,7 +665,6 @@ body[data-role="guest"]   .student-only{display:none!important;}
         </div>
       </div>
 
-      <!-- ROW 3: Priority Pie + Assignee Workload -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
         <div class="form-card">
           <div class="form-hdr"><h3>Priority Distribution</h3><p>Low / Medium / High</p></div>
@@ -661,7 +684,6 @@ body[data-role="guest"]   .student-only{display:none!important;}
         </div>
       </div>
 
-      <!-- ROW 4: Lost & Found Overview — all DB-driven -->
       <div class="form-card">
         <div class="form-hdr"><h3>Lost &amp; Found Overview</h3><p>Live item tracking statistics</p></div>
         <div class="form-body">
@@ -670,6 +692,87 @@ body[data-role="guest"]   .student-only{display:none!important;}
             <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--found)" id="aFoundCount">—</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Found Reports</div></div>
             <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--match)" id="aMatchCount">—</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Claimed Items</div></div>
             <div style="background:var(--surface2);border-radius:10px;padding:16px;border:1px solid var(--border)"><div style="font-size:1.6rem;font-family:'Syne',sans-serif;font-weight:800;color:var(--accent)" id="aAutoEsc">—</div><div style="font-size:.75rem;color:var(--muted);margin-top:3px">Auto-Escalated</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STUDENT PROFILE (student only) ── -->
+    <div class="view student-only" id="view-profile">
+      <div class="sec-hdr">
+        <div><h2>👤 My Profile</h2><p>View and update your account details</p></div>
+      </div>
+
+      <div class="form-card" style="max-width:640px;margin-bottom:20px">
+        <div class="form-hdr">
+          <h3>Personal Information</h3>
+          <p>Update your name, roll number and department</p>
+        </div>
+        <div class="form-body">
+          <div style="display:flex;align-items:center;gap:18px;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border)">
+            <div id="profileAvatar" style="width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:800;color:#fff;flex-shrink:0">?</div>
+            <div>
+              <div id="profileFullName" style="font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:800;color:var(--text)">—</div>
+              <div id="profileEmail" style="font-size:.8rem;color:var(--muted);margin-top:2px">—</div>
+              <div id="profileRoleBadge" style="display:inline-block;margin-top:6px;font-size:.68rem;font-weight:700;padding:2px 10px;border-radius:20px;background:rgba(79,142,247,.15);color:var(--accent);border:1px solid rgba(79,142,247,.25)">Student</div>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div><label class="f-lbl">First Name *</label><input type="text" class="f-inp" id="pfFirst" placeholder="First name" /></div>
+            <div><label class="f-lbl">Last Name</label><input type="text" class="f-inp" id="pfLast" placeholder="Last name" /></div>
+            <div><label class="f-lbl">Roll Number</label><input type="text" class="f-inp" id="pfRoll" placeholder="e.g. 21CS1001" /></div>
+            <div><label class="f-lbl">Department</label>
+              <select class="f-sel" id="pfDept">
+                <option value="">Select department</option>
+                <option>CSE</option><option>ECE</option><option>EEE</option>
+                <option>Civil</option><option>Mechanical</option><option>Chemical</option>
+                <option>MBA</option><option>MCA</option><option>Other</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="profileInfoMsg" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;font-size:.82rem"></div>
+
+          <div style="display:flex;justify-content:flex-end;margin-top:18px">
+            <button class="btn btn-primary" id="pfSaveBtn" onclick="saveProfileInfo()">💾 Save Changes</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-card" style="max-width:640px">
+        <div class="form-hdr">
+          <h3>🔒 Change Password</h3>
+          <p>Use a strong password of at least 8 characters</p>
+        </div>
+        <div class="form-body">
+          <div class="form-grid">
+            <div class="form-full"><label class="f-lbl">Current Password *</label>
+              <div style="position:relative">
+                <input type="password" class="f-inp" id="pfCurrPw" placeholder="Enter current password" style="padding-right:42px" />
+                <button type="button" onclick="togglePwVis('pfCurrPw',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:.9rem;color:var(--muted)">👁️</button>
+              </div>
+            </div>
+            <div><label class="f-lbl">New Password *</label>
+              <div style="position:relative">
+                <input type="password" class="f-inp" id="pfNewPw" placeholder="Min 8 characters" style="padding-right:42px" oninput="checkPwStrength(this.value)" />
+                <button type="button" onclick="togglePwVis('pfNewPw',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:.9rem;color:var(--muted)">👁️</button>
+              </div>
+              <div id="pwStrengthBar" style="height:3px;border-radius:2px;margin-top:6px;background:var(--border);overflow:hidden"><div id="pwStrengthFill" style="height:100%;width:0;transition:width .3s,background .3s"></div></div>
+              <div id="pwStrengthLabel" style="font-size:.68rem;color:var(--muted);margin-top:3px"></div>
+            </div>
+            <div><label class="f-lbl">Confirm New Password *</label>
+              <div style="position:relative">
+                <input type="password" class="f-inp" id="pfConfPw" placeholder="Repeat new password" style="padding-right:42px" />
+                <button type="button" onclick="togglePwVis('pfConfPw',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:.9rem;color:var(--muted)">👁️</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="profilePwMsg" style="display:none;margin-top:12px;padding:10px 14px;border-radius:8px;font-size:.82rem"></div>
+
+          <div style="display:flex;justify-content:flex-end;margin-top:18px">
+            <button class="btn btn-primary" id="pfPwBtn" onclick="saveProfilePassword()">🔒 Update Password</button>
           </div>
         </div>
       </div>
@@ -694,7 +797,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
         <div class="typing-dots" id="chatTyping"><span></span><span></span><span></span></div>
         <div class="chat-input-row">
           <input type="text" id="chatInput" placeholder="Type your message… (Enter to send)" onkeydown="chatKeydown(event)"/>
-          <button class="btn btn-primary btn-sm" onclick="sendChat()">Send ➤</button>
+          <button class="btn btn-primary btn-sm" id="chatSendBtn" onclick="sendChat()">Send ➤</button>
         </div>
         <div style="padding:10px 14px 14px;display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--border)">
           <button class="fc" onclick="document.getElementById('chatInput').value='How do I submit a grievance?';sendChat()">Submit grievance?</button>
@@ -705,11 +808,6 @@ body[data-role="guest"]   .student-only{display:none!important;}
       </div>
     </div>
 
-    <!-- ══════════════════════════════════════
-         (Messages is now a slide-in drawer,
-          not a view — see #msgDrawer below)
-    ══════════════════════════════════════ -->
-
   </div><!-- /.content -->
 </main>
 
@@ -717,13 +815,9 @@ body[data-role="guest"]   .student-only{display:none!important;}
      MESSAGES DRAWER + FAB
 ════════════════════════════════════ -->
 
-<!-- Backdrop -->
 <div id="msgDrawerBackdrop" onclick="closeMsgDrawer()"></div>
 
-<!-- Drawer panel -->
 <div id="msgDrawer">
-
-  <!-- Top bar -->
   <div class="mdr-topbar">
     <h3>💬 Messages</h3>
     <span id="msgUnreadCount" style="font-size:.72rem;color:var(--muted);margin-right:auto;padding-left:8px"></span>
@@ -731,10 +825,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
     <button class="mdr-close" onclick="closeMsgDrawer()" title="Close">✕</button>
   </div>
 
-  <!-- Body: threads + convo -->
   <div class="mdr-body">
-
-    <!-- LEFT: thread list -->
     <div class="mdr-threads" id="mdrThreads">
       <div class="mdr-search">
         <input type="text" id="msgSearchInput"
@@ -749,10 +840,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
       </div>
     </div>
 
-    <!-- RIGHT: active conversation -->
     <div class="mdr-convo" id="mdrConvo">
-
-      <!-- Empty state -->
       <div class="mdr-empty" id="msgEmptyState">
         <div class="mdr-empty-icon">💬</div>
         <div style="font-weight:600;color:var(--text)">No conversation selected</div>
@@ -762,10 +850,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
         <button class="mdr-new-btn" onclick="openNewMessageModal()">✏️ New Message</button>
       </div>
 
-      <!-- Active thread -->
       <div id="msgActiveThread" style="display:none;flex-direction:column;height:100%">
-
-        <!-- Header -->
         <div class="mdr-convo-hdr">
           <div class="mt-avatar" id="msgActiveAvatar">?</div>
           <div class="mdr-convo-hdr-info">
@@ -775,30 +860,24 @@ body[data-role="guest"]   .student-only{display:none!important;}
           <button class="btn btn-ghost btn-sm" onclick="refreshActiveThread()" title="Refresh">🔄</button>
         </div>
 
-        <!-- Linked-item tag -->
         <div id="msgRefTagWrap" style="padding:7px 16px 0;display:none">
           <span class="msg-ref-tag" id="msgRefTag">🔗 Linked: —</span>
         </div>
 
-        <!-- Bubbles -->
         <div class="mdr-msgs" id="msgBody"></div>
 
-        <!-- Compose -->
         <div class="mdr-compose">
           <input type="text" id="msgComposeInput"
                  placeholder="Type a message… (Enter to send)"
                  onkeydown="msgComposeKeydown(event)"/>
           <button class="btn btn-primary btn-sm" onclick="sendMsgReply()">Send ➤</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-      </div><!-- /#msgActiveThread -->
-    </div><!-- /.mdr-convo -->
-
-  </div><!-- /.mdr-body -->
-</div><!-- /#msgDrawer -->
-
-<!-- Floating action button -->
-<button id="msgFab" onclick="openMsgDrawer()" title="Open Messages">
+<button id="msgFab" onclick="openMsgDrawer()" title="Open Messages" class="student-only">
   💬
   <span id="msgFabBadge">0</span>
 </button>
@@ -911,7 +990,7 @@ body[data-role="guest"]   .student-only{display:none!important;}
         </div>
         <div class="form-footer">
           <label class="checkbox-wrap"><input type="checkbox"/>Remember me</label>
-          <a href="#" class="link">Forgot password?</a>
+          <a href="#" class="link" onclick="openForgotPassword();return false">Forgot password?</a>
         </div>
         <button type="button" class="btn btn-primary btn-full" onclick="handleLogin()">Sign In →</button>
       </form>
@@ -967,25 +1046,40 @@ body[data-role="guest"]   .student-only{display:none!important;}
   </div>
 </div>
 
+<!-- FORGOT PASSWORD MODAL -->
+<div class="modal-overlay" id="forgotPwModal" style="display:none;z-index:2000" onclick="if(event.target===this)closeForgotPassword()">
+  <div class="modal" style="max-width:420px;width:100%">
+    <div class="modal-icon">🔑</div>
+    <h3 style="margin-bottom:6px">Reset Password</h3>
+    <p style="font-size:.85rem;color:var(--muted2);margin-bottom:18px">Enter your college email and we'll send a reset link.</p>
+    <div id="fpSuccBox" style="display:none;margin-bottom:14px"></div>
+    <div id="fpErrBox"  style="display:none;margin-bottom:14px"></div>
+    <div style="margin-bottom:16px;text-align:left">
+      <label class="f-lbl">College Email</label>
+      <input type="email" class="f-inp" id="fpEmail" placeholder="you@college.edu" onkeydown="if(event.key==='Enter')sendForgotPassword()"/>
+      <div class="err-msg" id="fpEmailErr">Enter a valid email</div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeForgotPassword()">Cancel</button>
+      <button class="btn btn-primary" id="fpSubmitBtn" onclick="sendForgotPassword()">Send Reset Link →</button>
+    </div>
+  </div>
+</div>
+
 <script src="/static/script.js"></script>
 <script>
-/* ── Messages Drawer helpers ──
-   openMsgDrawer() / closeMsgDrawer() are called from the FAB,
-   the sidebar nav button, and any "Message" button on LF cards.
-   They load threads via the existing loadMessageThreads() in script.js
-   (or gracefully no-op if that function isn't defined yet).
-*/
 function openMsgDrawer(opts) {
+  if (window._userRole === 'admin') {
+    showToast('🚫', 'Admins do not have access to messages.');
+    return;
+  }
   document.getElementById('msgDrawer').classList.add('open');
   document.getElementById('msgDrawerBackdrop').classList.add('open');
   document.body.style.overflow = 'hidden';
-  // Load threads if the function exists in script.js
   if (typeof loadMessageThreads === 'function') loadMessageThreads();
-  // If a specific thread ref was passed (e.g. from a LF card), open it
   if (opts && opts.threadId && typeof openMsgThread === 'function') {
-    openMsgThread(opts.threadId);
+    openMsgThread(opts.threadId, opts.itemId);
   }
-  // If a pre-filled recipient was passed (new message context)
   if (opts && opts.to && typeof openNewMessageModal === 'function') {
     openNewMessageModal(opts);
   }
@@ -995,14 +1089,20 @@ function closeMsgDrawer() {
   document.getElementById('msgDrawer').classList.remove('open');
   document.getElementById('msgDrawerBackdrop').classList.remove('open');
   document.body.style.overflow = '';
+  if (typeof clearInterval !== 'undefined' && window._drawerPollInterval) {
+    clearInterval(window._drawerPollInterval);
+  }
+  const emptyState   = document.getElementById('msgEmptyState');
+  const activeThread = document.getElementById('msgActiveThread');
+  if (emptyState)   emptyState.style.display   = '';
+  if (activeThread) activeThread.style.display = 'none';
+  document.querySelectorAll('.msg-thread-item').forEach(el => el.classList.remove('active'));
 }
 
-// Close on Escape key
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeMsgDrawer();
 });
 
-// Show/hide FAB badge from unread count
 function updateMsgFabBadge(count) {
   const badge = document.getElementById('msgFabBadge');
   if (!badge) return;
