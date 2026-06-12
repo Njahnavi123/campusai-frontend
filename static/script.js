@@ -72,6 +72,7 @@ const viewMeta = {
   admin       : ['Admin Panel',          'Manage all grievances & items'],
   analytics   : ['Analytics',           'Grievance & item statistics'],
   chatbot     : ['AI Chatbot',           'Ask anything about your campus'],
+  profile     : ['My Profile',          'View and edit your account details'],
 };
 
 function appView(name, navEl) {
@@ -93,6 +94,7 @@ function appView(name, navEl) {
   if (name === 'lf-browse')  loadLFItems();
   if (name === 'lf-matches') loadLFMatches();
   if (name === 'messages')   loadMessageThreads();
+  if (name === 'profile')    loadProfile();
 }
 
 /* FLASK MSG HANDLER */
@@ -163,7 +165,7 @@ function _showGrvModal(subject) {
 /* ═══════════════════════════════════════
    LIVE GRIEVANCE DATA
 ═══════════════════════════════════════ */
-let _allGrievances = [], _myGrievances = [], _grvFilter = 'all', _grvCatFilter = '';
+let _allGrievances = [], _myGrievances = [], _grvFilter = 'all', _grvCatFilter = '', _grvSearch = '';
 
 async function loadAllGrievances() {
   try {
@@ -195,7 +197,7 @@ async function loadAdminGrievances() {
 }
 
 /* ═══════════════════════════════════════
-   ANALYTICS — 100% DB-DRIVEN
+   ANALYTICS
 ═══════════════════════════════════════ */
 let _chartInstances = {};
 function _destroyChart(key) {
@@ -393,6 +395,13 @@ function _getFilteredGrv() {
   let list = _allGrievances;
   if (_grvFilter !== 'all') list = list.filter(g => g.status === _grvFilter);
   if (_grvCatFilter)        list = list.filter(g => g.category === _grvCatFilter);
+  if (_grvSearch) {
+    const q = _grvSearch.toLowerCase();
+    list = list.filter(g =>
+      (g.subject     || '').toLowerCase().includes(q) ||
+      (g.description || '').toLowerCase().includes(q)
+    );
+  }
   return list;
 }
 function filterGrv(type, el) {
@@ -402,6 +411,20 @@ function filterGrv(type, el) {
   _renderGrvTable(_getFilteredGrv());
 }
 function filterGrvCat(val) { _grvCatFilter = val; _renderGrvTable(_getFilteredGrv()); }
+function filterGrvSearch(val) {
+  _grvSearch = val.trim();
+  const clearBtn = document.getElementById('grvSearchClear');
+  if (clearBtn) clearBtn.style.display = _grvSearch ? 'flex' : 'none';
+  _renderGrvTable(_getFilteredGrv());
+}
+function clearGrvSearch() {
+  _grvSearch = '';
+  const inp = document.getElementById('grvSearchInput');
+  if (inp) inp.value = '';
+  const clearBtn = document.getElementById('grvSearchClear');
+  if (clearBtn) clearBtn.style.display = 'none';
+  _renderGrvTable(_getFilteredGrv());
+}
 
 function _renderGrvTable(data) {
   const tbody = document.getElementById('grvTable'); if (!tbody) return;
@@ -752,20 +775,58 @@ function openGrvDetailDB(id) {
 }
 
 async function loadNotifications() {
-  const res  = await fetch('/api/notifications');
-  const data = await res.json();
-  let html = '';
-  data.forEach(n => {
-    const isEsc = n.message && n.message.includes('AUTO-ESCALATED');
-    html += `<div class="notif-item" style="${!n.is_read?'border-left:3px solid var(--accent);background:rgba(79,142,247,.06);':''}${isEsc?'border-left-color:#f75f5f!important;':''}">${n.message}<div style="font-size:.68rem;color:var(--muted);margin-top:4px">${(n.created_at||'').slice(0,16)}</div></div>`;
-  });
-  document.getElementById('notifList').innerHTML = html || '<div class="notif-item" style="color:var(--muted)">No notifications yet.</div>';
-  fetch('/api/notifications/mark_read',{method:'POST'}).then(()=>_pollNotificationBadge());
+  try {
+    const res  = await fetch('/api/notifications');
+    const data = await res.json();
+    const unreadCount = data.filter(n => !n.is_read).length;
+    const hdr = document.getElementById('notifPanelHeader');
+    if (hdr) {
+      const badge = unreadCount > 0
+        ? `<span style="background:var(--lost);color:#fff;font-size:.6rem;font-weight:800;padding:1px 6px;border-radius:10px;margin-left:6px;">${unreadCount} new</span>`
+        : '';
+      const markBtn = unreadCount > 0
+        ? `<button onclick="markAllNotifRead()" style="font-size:.72rem;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;font-weight:600;">Mark all read</button>`
+        : '';
+      hdr.innerHTML = `<span>Notifications${badge}</span>${markBtn}`;
+    }
+    let html = '';
+    data.forEach(n => {
+      const isEsc  = n.message && n.message.includes('AUTO-ESCALATED');
+      const unread = !n.is_read;
+      let cls = 'notif-item';
+      if (unread) cls += ' notif-unread';
+      if (isEsc)  cls += ' notif-esc';
+      html += `<div class="${cls}" data-id="${n.id}">${n.message}<div style="font-size:.68rem;color:var(--muted);margin-top:4px">${(n.created_at||'').slice(0,16)}</div></div>`;
+    });
+    document.getElementById('notifList').innerHTML = html || '<div class="notif-item" style="color:var(--muted)">No notifications yet.</div>';
+    fetch('/api/notifications/mark_read', {method:'POST'}).then(() => _pollNotificationBadge());
+  } catch(e) {
+    document.getElementById('notifList').innerHTML = '<div class="notif-item" style="color:var(--muted)">Failed to load.</div>';
+  }
 }
+
+async function markAllNotifRead() {
+  await fetch('/api/notifications/mark_read', {method:'POST'});
+  _pollNotificationBadge();
+  loadNotifications();
+}
+
 function toggleNotifications() {
   const p = document.getElementById('notifPanel');
   p.classList.toggle('show');
-  if (p.classList.contains('show')) loadNotifications();
+  if (p.classList.contains('show')) {
+    loadNotifications();
+    setTimeout(() => {
+      document.addEventListener('click', _closeNotifOnOutside, {once: true, capture: true});
+    }, 50);
+  }
+}
+function _closeNotifOnOutside(e) {
+  const panel = document.getElementById('notifPanel');
+  const iconBtn = panel?.closest('.tb-r')?.querySelector('.icon-btn');
+  if (panel && !panel.contains(e.target) && (!iconBtn || !iconBtn.contains(e.target))) {
+    panel.classList.remove('show');
+  }
 }
 
 /* ═══════════════════════════════════════
@@ -789,12 +850,37 @@ async function loadLFItems() {
     if (grid) grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--lost)">Failed to load items.</div>`;
   }
 }
+
+/* ─────────────────────────────────────────────────────────
+   CHANGE 1 of 2 — _updateLFKPIs refreshes the live count
+   shown beside the item total in the browse panel header.
+   ───────────────────────────────────────────────────────── */
 function _updateLFKPIs() {
-  _setText('lfKpiLost',  _lfItems.filter(i=>i.type==='lost').length);
-  _setText('lfKpiFound', _lfItems.filter(i=>i.type==='found').length);
+  const lostCount  = _lfItems.filter(i => i.type === 'lost').length;
+  const foundCount = _lfItems.filter(i => i.type === 'found').length;
+
+  _setText('lfKpiLost',  lostCount);
+  _setText('lfKpiFound', foundCount);
+
+  // Live panel count
   const c = document.getElementById('lfItemCount');
-  if (c) c.textContent = `${_lfItems.length} items · Updated now`;
+  if (c) c.textContent = `${_lfItems.length} item${_lfItems.length !== 1 ? 's' : ''} · Updated just now`;
+
+  // Filter chip count badges
+  const lostChip  = document.getElementById('lfChipLost');
+  const foundChip = document.getElementById('lfChipFound');
+  const allChip   = document.getElementById('lfChipAll');
+  if (lostChip)  lostChip.dataset.count  = lostCount;
+  if (foundChip) foundChip.dataset.count = foundCount;
+  if (allChip)   allChip.dataset.count   = _lfItems.length;
+
+  // ── FIX: update sidebar nav badges (nbLFItems for student, nbLFItemsAdmin for admin) ──
+  const nbStudent = document.getElementById('nbLFItems');
+  const nbAdmin   = document.getElementById('nbLFItemsAdmin');
+  if (nbStudent) nbStudent.textContent = _lfItems.length;
+  if (nbAdmin)   nbAdmin.textContent   = _lfItems.length;
 }
+
 function _applyLFFilter() {
   let list = _lfItems;
   if (_lfTypeFilter !== 'all') list = list.filter(i=>i.type===_lfTypeFilter);
@@ -818,6 +904,10 @@ function handleSearch(q) {
   ));
 }
 
+/* ─────────────────────────────────────────────────────────
+   CHANGE 2 of 2 — Button text changed from
+   "✋ I Found It" / "✋ I Lost It"  →  "💬 Send Message"
+   ───────────────────────────────────────────────────────── */
 function _renderLFItems(list) {
   const grid = document.getElementById('lfGrid'); if (!grid) return;
   if (!list.length) {
@@ -825,7 +915,7 @@ function _renderLFItems(list) {
     return;
   }
   grid.innerHTML = list.map(item => {
-    const emoji  = _lfEmoji(item.category);
+    const emoji   = _lfEmoji(item.category);
     const dateStr = item.date || (item.created_at ? item.created_at.slice(0,10) : '');
     const hasImg  = item.image_path && item.image_path.trim() !== '';
     const imgHtml = hasImg
@@ -849,10 +939,10 @@ function _renderLFItems(list) {
         </div>
         <div class="item-foot">
           <div style="display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--muted2)"><div class="poster-av">👤</div>Anonymous</div>
-          <button class="btn ${item.type==='lost'?'btn-found':'btn-lost'} btn-xs"
+          ${window._userRole !== 'admin' ? `<button class="btn btn-primary btn-xs"
             onclick="event.stopPropagation();startMessageFromItem(${item.id},'${escHtml(item.title).replace(/'/g,"\\'")}',${item.user_id})">
-            ${item.type==='lost'?'✋ I Found It':'✋ I Lost It'}
-          </button>
+            💬 Send Message
+          </button>` : ''}
         </div>
       </div>
     </div>`;
@@ -861,8 +951,6 @@ function _renderLFItems(list) {
 
 /* ═══════════════════════════════════════
    LOST & FOUND DETAIL PANEL
-   — Contact section removed
-   — Anonymous message button shown inline
 ═══════════════════════════════════════ */
 function openLFDetailDB(id) {
   const item = _lfItems.find(x=>x.id===id);
@@ -877,9 +965,9 @@ function openLFDetailDB(id) {
     ? `<img src="${item.image_path}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" /><button class="dp-close" onclick="closeDetail()">✕</button>`
     : `${emoji}<button class="dp-close" onclick="closeDetail()">✕</button>`;
 
-  // ── Message action button (no Contact heading) ───────────
   let msgHtml = '';
-  if (window._loggedIn && !isOwner) {
+  const isAdmin = window._userRole === 'admin';
+  if (window._loggedIn && !isOwner && !isAdmin) {
     msgHtml = `
       <div style="margin-top:16px;">
         <button class="btn btn-found btn-sm" style="width:100%;justify-content:center;gap:8px;"
@@ -888,7 +976,7 @@ function openLFDetailDB(id) {
         </button>
         <div style="font-size:.68rem;color:var(--muted);text-align:center;margin-top:6px;">🔒 Your identity is never revealed</div>
       </div>`;
-  } else if (isOwner) {
+  } else if (isOwner && !isAdmin) {
     msgHtml = `
       <div style="margin-top:16px;">
         <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;"
@@ -896,7 +984,7 @@ function openLFDetailDB(id) {
           📩 View My Messages
         </button>
       </div>`;
-  } else {
+  } else if (!window._loggedIn) {
     msgHtml = `
       <div style="margin-top:16px;">
         <button class="btn btn-found btn-sm" style="width:100%;justify-content:center;"
@@ -966,6 +1054,7 @@ function handleLFImageSelect(input) {
   };
   reader.readAsDataURL(file);
 }
+
 async function submitLF() {
   if (!window._loggedIn) { showToast('🔒','Please log in.'); return; }
   const title = document.getElementById('iTitle').value.trim();
@@ -974,6 +1063,17 @@ async function submitLF() {
     showToast('📷','Please upload a photo.');
     document.getElementById('lfPhotoSection').scrollIntoView({behavior:'smooth',block:'nearest'});
     return;
+  }
+  if (lfType==='found') {
+    const locker = (document.getElementById('iLockerNumber')?.value||'').trim();
+    const lockerErr = document.getElementById('iLockerErr');
+    if (!locker) {
+      if (lockerErr) lockerErr.classList.add('show');
+      document.getElementById('lfLockerSection').scrollIntoView({behavior:'smooth',block:'nearest'});
+      showToast('🔐','Please enter the locker number where you deposited the item.');
+      return;
+    }
+    if (lockerErr) lockerErr.classList.remove('show');
   }
   const payload = {
     type: lfType, title,
@@ -994,8 +1094,16 @@ async function submitLF() {
     const res  = await fetch('/api/lf/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const data = await res.json();
     if (!res.ok || !data.ok) { showToast('❌', data.error||'Submission failed.'); return; }
-    _lfItems.unshift(data.item);
+
+    // FIX 1: Ensure type is always set correctly from lfType (not just from server response)
+    const newItem = { ...data.item, type: data.item.type || lfType };
+    _lfItems.unshift(newItem);
+
+    // FIX 2: Update KPIs and re-render grid immediately with correct counts
     _updateLFKPIs();
+    _applyLFFilter();
+
+    // ── Reset form ─────────────────────────────────────────────────
     ['iTitle','iDesc','iColor','iBrand','iLocOther','iTime'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
     const id2 = document.getElementById('iDate'); if (id2) id2.valueAsDate = new Date();
     const le  = document.getElementById('iLockerNumber'); if (le) le.value = '';
@@ -1003,6 +1111,7 @@ async function submitLF() {
     const pv = document.getElementById('lfImagePreview'); if (pv) pv.innerHTML='';
     const slot = document.getElementById('lfImgSlot');
     if (slot) { slot.innerHTML='📷<span>Add Photo</span>'; slot.classList.remove('has-img'); }
+
     const ref = `LF-${String(data.item.id).padStart(4,'0')}`;
     document.getElementById('modalIcon').textContent  = lfType==='lost' ? '📢' : '🎉';
     document.getElementById('modalTitle').textContent = lfType==='lost' ? 'Lost Item Reported!' : 'Found Item Posted!';
@@ -1010,8 +1119,11 @@ async function submitLF() {
       ? 'Your report is live. AI is scanning for matches!'
       : 'Your found item is posted. Owner will be notified if matched!';
     document.getElementById('modalRef').textContent   = ref;
+
+    // FIX 3: On modal close, do a full fresh loadLFItems() so counts are always accurate
     document.getElementById('modalBtn').onclick = () => {
       closeModal();
+      loadLFItems(); // full server reload — guarantees counts are in sync
       appView('lf-browse', document.querySelector('[data-view="lf-browse"]'));
     };
     document.getElementById('successModal').classList.add('show');
@@ -1074,91 +1186,259 @@ function confirmLFMatch(lostId, foundId, btn) {
   fetch('/api/lf/confirm_match',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lost_id:lostId,found_id:foundId})})
     .then(r=>r.json())
     .then(data => {
-      if (data.ok) { btn.textContent='✅ Confirmed'; showToast('✅','Match confirmed!'); setTimeout(()=>loadLFMatches(),800); }
+      if (data.ok) {
+        showToast('✅','Match confirmed!');
+        // Remove just this one card instead of reloading everything
+        const card = btn.closest('.match-pair');
+        if (card) {
+          card.style.transition = 'opacity .4s, transform .4s';
+          card.style.opacity = '0';
+          card.style.transform = 'translateX(30px)';
+          setTimeout(() => {
+            card.remove();
+            // Update the header count
+            const remaining = document.querySelectorAll('.match-pair').length;
+            const hdr = document.getElementById('matchesSubHdr');
+            if (hdr) hdr.textContent = `${remaining} match${remaining !== 1 ? 'es' : ''} found · Updated just now`;
+            if (remaining === 0) {
+              const container = document.getElementById('matchesList');
+              if (container) container.innerHTML = `<div style="text-align:center;padding:56px 20px;color:var(--muted)"><div style="font-size:3rem;margin-bottom:14px">🔍</div><div style="font-size:.95rem;font-weight:600;color:var(--text);margin-bottom:6px">No matches found yet</div><div style="font-size:.82rem;color:var(--muted2)">As more items are posted, AI will detect similarities.</div></div>`;
+            }
+          }, 400);
+        }
+      }
       else { btn.disabled=false; btn.textContent='✅ Confirm'; showToast('❌',data.error||'Failed.'); }
     })
     .catch(()=>{ btn.disabled=false; btn.textContent='✅ Confirm'; showToast('❌','Network error.'); });
 }
-function dismissLFMatch(btn) {
-  const card = btn.closest('.match-pair');
-  if (card) { card.style.transition='opacity .3s,transform .3s'; card.style.opacity='0'; card.style.transform='translateX(30px)'; setTimeout(()=>card.remove(),300); }
-  showToast('✕','Dismissed.');
-}
-
 /* ═══════════════════════════════════════
    ANONYMOUS MESSAGING SYSTEM
-   ─ Fully active & wired up
-   ─ /api/messages/send  → first message (new thread)
-   ─ /api/messages/reply → reply in existing thread
-   ─ /api/messages/thread/<id> → full thread (marks read)
-   ─ /api/messages/threads → list all threads
 ═══════════════════════════════════════ */
 let _activeThreadId  = null;
 let _activeItemId    = null;
 let _msgPollInterval = null;
+let _drawerThreadId  = null;
+let _drawerItemId    = null;
+let _drawerPollInterval = null;
 
-/* Ensure the global overlay exists in DOM */
 function _ensureMsgOverlay() {
   if (document.getElementById('msgOverlay')) return;
   const o = document.createElement('div');
   o.id = 'msgOverlay';
   o.style.cssText = [
-    'display:none',
-    'position:fixed',
-    'inset:0',
-    'background:rgba(0,0,0,.72)',
-    'z-index:9998',
-    'align-items:center',
-    'justify-content:center',
-    'padding:16px',
-    'box-sizing:border-box',
-    'backdrop-filter:blur(6px)',
+    'display:none','position:fixed','inset:0','background:rgba(0,0,0,.72)',
+    'z-index:9998','align-items:center','justify-content:center',
+    'padding:16px','box-sizing:border-box','backdrop-filter:blur(6px)',
   ].join(';');
   document.body.appendChild(o);
 }
 
+function updateMsgFabBadge(count) {
+  const badge = document.getElementById('msgNavBadge');
+  if (!badge) return;
+  if (count > 0) { badge.textContent = count; badge.style.display = 'inline-flex'; }
+  else           { badge.textContent = '';    badge.style.display = 'none'; }
+}
+
+function openMsgDrawer(opts) {
+  const navEl = document.querySelector('[data-view="messages"]');
+  appView('messages', navEl);
+  if (opts && opts.threadId && opts.itemId) {
+    setTimeout(() => openMsgThread(opts.threadId, opts.itemId), 200);
+  }
+}
+
+async function openMsgThread(threadId, itemId) {
+  if (window._userRole === 'admin') return;
+  _drawerThreadId = threadId;
+  _drawerItemId   = itemId;
+  document.querySelectorAll('.msg-thread-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.thread === String(threadId));
+  });
+  const emptyState   = document.getElementById('msgEmptyState');
+  const activeThread = document.getElementById('msgActiveThread');
+  if (emptyState)   emptyState.style.display   = 'none';
+  if (activeThread) activeThread.style.display = 'flex';
+  await _renderDrawerThread(threadId, itemId, false);
+  clearInterval(_drawerPollInterval);
+  _drawerPollInterval = setInterval(() => _renderDrawerThread(_drawerThreadId, _drawerItemId, true), 5000);
+}
+
+async function _renderDrawerThread(threadId, itemId, silent = false) {
+  try {
+    const res  = await fetch(`/api/messages/thread/${threadId}`);
+    const data = await res.json();
+    if (data.error) { showToast('❌', data.error); return; }
+    const { messages, item } = data;
+    if (!silent) {
+      const avatarEl = document.getElementById('msgActiveAvatar');
+      const nameEl   = document.getElementById('msgActiveName');
+      const subEl    = document.getElementById('msgActiveSub');
+      const refWrap  = document.getElementById('msgRefTagWrap');
+      const refTag   = document.getElementById('msgRefTag');
+      if (avatarEl) avatarEl.textContent = (item.title || 'IT').slice(0, 2).toUpperCase();
+      if (nameEl)   nameEl.textContent   = item.title || 'Item';
+      if (subEl)    subEl.textContent    = `🔒 Anonymous · ${item.status === 'claimed' ? 'Claimed' : 'Open'}`;
+      if (refWrap)  refWrap.style.display = 'block';
+      if (refTag)   refTag.textContent   = `🔗 LF-${String(itemId).padStart(4, '0')}: ${item.title || ''}`;
+    }
+    const bodyEl = document.getElementById('msgBody');
+    if (!bodyEl) return;
+    const atBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 80;
+    bodyEl.innerHTML = _renderDrawerBubbles(messages);
+    if (!silent || atBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
+    if (!silent) { const inp = document.getElementById('msgComposeInput'); if (inp) inp.focus(); }
+    _pollNotificationBadge();
+    _refreshThreadListSilent();
+  } catch(e) { console.error('[_renderDrawerThread]', e); }
+}
+
+function _renderDrawerBubbles(messages) {
+  if (!messages.length)
+    return `<div style="text-align:center;padding:40px;color:var(--muted);font-size:.82rem">No messages yet. Say hello! 👋</div>`;
+  return messages.map(m => {
+    const isMe = m.author === 'me';
+    let ts = '';
+    if (m.created_at) {
+      const d = new Date(m.created_at.replace(' ', 'T')), now = new Date();
+      ts = d.toDateString() === now.toDateString()
+        ? d.toTimeString().slice(0, 5)
+        : `${d.getDate()} ${d.toLocaleString('default', {month:'short'})} ${d.toTimeString().slice(0, 5)}`;
+    }
+    return `<div class="msg-bubble-wrap ${isMe ? 'me' : 'them'}">
+      ${!isMe ? `<div class="mt-avatar" style="width:28px;height:28px;font-size:.6rem;background:linear-gradient(135deg,var(--accent),var(--accent2))">AN</div>` : ''}
+      <div style="display:flex;flex-direction:column;align-items:${isMe?'flex-end':'flex-start'}">
+        <div class="msg-bubble">${escHtml(m.body)}</div>
+        <div class="msg-btime">${isMe ? 'You' : 'Anonymous'} · ${ts}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function _refreshThreadListSilent() {
+  try {
+    const res = await fetch('/api/messages/threads');
+    const threads = await res.json();
+    const totalUnread = threads.reduce((s, t) => s + (t.unread || 0), 0);
+    updateMsgFabBadge(totalUnread);
+    const unreadEl = document.getElementById('msgUnreadCount');
+    if (unreadEl) unreadEl.textContent = totalUnread > 0 ? `${totalUnread} unread` : '';
+  } catch(e) {}
+}
+
+function filterMsgThreads(query) {
+  const q = (query || '').toLowerCase();
+  document.querySelectorAll('.msg-thread-item').forEach(el => {
+    const name = el.querySelector('.mt-name')?.textContent.toLowerCase() || '';
+    el.style.display = (!q || name.includes(q)) ? '' : 'none';
+  });
+}
+
+function msgComposeKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsgReply(); }
+}
+
+async function sendMsgReply() {
+  let inp = null, threadId = null, itemId = null;
+  const activeThread = document.getElementById('msgActiveThread');
+  const drawerInp    = document.getElementById('msgComposeInput');
+  if (activeThread && activeThread.style.display !== 'none' && drawerInp && _drawerThreadId) {
+    inp = drawerInp; threadId = _drawerThreadId; itemId = _drawerItemId;
+  } else if (_activeThreadId) {
+    inp = document.getElementById('msgInput'); threadId = _activeThreadId; itemId = _activeItemId;
+  }
+  if (!inp || !threadId) return;
+  const body = inp.value.trim();
+  if (!body) return;
+  inp.value = '';
+  if (inp.style) inp.style.height = '';
+  try {
+    const res  = await fetch('/api/messages/reply', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ thread_id: threadId, body }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      if (_drawerThreadId && activeThread && activeThread.style.display !== 'none') {
+        await _renderDrawerThread(_drawerThreadId, _drawerItemId, true);
+        const bodyEl = document.getElementById('msgBody');
+        if (bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight;
+      }
+      if (_activeThreadId && document.getElementById('msgOverlay')?.style.display === 'flex') {
+        await _renderThread(_activeThreadId, _activeItemId, true);
+        const area = document.getElementById('msgBubbleArea');
+        if (area) area.scrollTop = area.scrollHeight;
+      }
+    } else {
+      showToast('❌', data.error || 'Failed to send.');
+      inp.value = body;
+    }
+  } catch(e) { showToast('❌', 'Network error.'); inp.value = body; }
+}
+
 async function loadMessageThreads() {
   _ensureMsgOverlay();
-  const container = document.getElementById('msgThreadList'); if (!container) return;
-  container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--muted)">Loading…</div>`;
+  const container = document.getElementById('msgThreadList');
+  if (!container) return;
+  if (window._userRole === 'admin') {
+    container.innerHTML = `<div style="text-align:center;padding:40px 14px;color:var(--muted);font-size:.82rem">🚫 Admins do not have access to anonymous messages.</div>`;
+    return;
+  }
+  container.innerHTML = `<div style="text-align:center;padding:40px 14px;color:var(--muted);font-size:.82rem">Loading conversations…</div>`;
   try {
-    const res     = await fetch('/api/messages/threads');
+    const res = await fetch('/api/messages/threads');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const threads = await res.json();
+    if (!Array.isArray(threads)) throw new Error('Invalid response from server');
+    const totalUnread = threads.reduce((s, t) => s + (t.unread || 0), 0);
+    const unreadEl = document.getElementById('msgUnreadCount');
+    if (unreadEl) unreadEl.textContent = totalUnread > 0 ? `${totalUnread} unread` : '';
+    updateMsgFabBadge(totalUnread);
     if (!threads.length) {
-      container.innerHTML = `<div style="text-align:center;padding:56px 20px;color:var(--muted)">
-        <div style="font-size:3rem;margin-bottom:14px">💬</div>
-        <div style="font-size:.95rem;font-weight:600;color:var(--text);margin-bottom:6px">No messages yet</div>
-        <div style="font-size:.82rem;color:var(--muted2)">Click "I Found It" or "I Lost It" on any item to start a conversation.</div>
+      container.innerHTML = `<div style="text-align:center;padding:48px 14px;color:var(--muted)">
+        <div style="font-size:2.6rem;margin-bottom:10px">💬</div>
+        <div style="font-size:.88rem;font-weight:600;color:var(--text);margin-bottom:5px">No messages yet</div>
+        <div style="font-size:.76rem;color:var(--muted2);line-height:1.5">Browse items and click<br>"Send Message" to start a conversation.</div>
       </div>`;
       return;
     }
     container.innerHTML = threads.map(t => {
       const hasImg = t.item_image && t.item_image.trim() !== '';
-      const unread = t.unread > 0;
-      return `<div
-        onclick="openThread('${t.thread_id}',${t.lf_item_id})"
-        style="display:flex;gap:12px;align-items:center;padding:14px 16px;border-radius:10px;cursor:pointer;border:1px solid ${unread?'rgba(79,142,247,.3)':'var(--border)'};background:${unread?'rgba(79,142,247,.05)':'var(--surface)'};margin-bottom:8px;transition:all .2s;"
-        onmouseover="this.style.background='rgba(79,142,247,.08)'"
-        onmouseout="this.style.background='${unread?'rgba(79,142,247,.05)':'var(--surface)'}'">
-        <div style="width:48px;height:48px;border-radius:10px;flex-shrink:0;overflow:hidden;background:${t.item_type==='lost'?'rgba(247,95,95,.12)':'rgba(56,226,184,.1)'};display:flex;align-items:center;justify-content:center;font-size:1.4rem">
-          ${hasImg?`<img src="${t.item_image}" style="width:100%;height:100%;object-fit:cover" />`:(t.item_type==='lost'?'🔴':'🟢')}
+      const unread = (t.unread || 0) > 0;
+      const initials = (t.item_title || 'IT').slice(0, 2).toUpperCase();
+      return `<div class="msg-thread-item ${unread ? 'unread' : ''}"
+        data-thread="${t.thread_id}"
+        onclick="openMsgThread('${t.thread_id}', ${t.lf_item_id})">
+        <div class="mt-avatar" style="${t.item_type === 'lost'
+          ? 'background:linear-gradient(135deg,#f75f5f,#f7a34f)'
+          : 'background:linear-gradient(135deg,#38e2b8,#4f8ef7)'}">
+          ${hasImg ? `<img src="${t.item_image}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" />` : initials}
         </div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:.85rem;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.item_title||'Item')}</div>
-          <div style="font-size:.72rem;color:var(--muted);margin-top:2px">${t.msg_count} message${t.msg_count!==1?'s':''} · ${(t.last_at||'').slice(0,10)}</div>
+        <div class="mt-info">
+          <div class="mt-row1">
+            <span class="mt-name">${escHtml(t.item_title || 'Item')}</span>
+            <span class="mt-time">${(t.last_at || '').slice(0, 10)}</span>
+          </div>
+          <div class="mt-preview">${t.msg_count} message${t.msg_count !== 1 ? 's' : ''}</div>
         </div>
-        ${unread?`<span style="background:#4f8ef7;color:#fff;border-radius:12px;padding:2px 8px;font-size:.7rem;font-weight:700;">${t.unread} new</span>`:''}
+        ${unread ? `<span class="mt-badge">${t.unread}</span>` : ''}
       </div>`;
     }).join('');
+    const searchVal = document.getElementById('msgSearchInput')?.value;
+    if (searchVal) filterMsgThreads(searchVal);
   } catch(e) {
-    container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--lost)">❌ Failed to load messages.</div>`;
+    console.error('[loadMessageThreads]', e);
+    container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--lost);font-size:.82rem">
+      ❌ Failed to load messages.<br>
+      <span style="font-size:.72rem;color:var(--muted)">Error: ${e.message}</span><br><br>
+      <button class="btn btn-ghost btn-sm" onclick="loadMessageThreads()">🔄 Retry</button>
+    </div>`;
   }
 }
 
 async function openThread(threadId, itemId) {
   _ensureMsgOverlay();
-  _activeThreadId = threadId;
-  _activeItemId   = itemId;
+  _activeThreadId = threadId; _activeItemId = itemId;
   const overlay = document.getElementById('msgOverlay');
   overlay.innerHTML = `<div style="text-align:center;padding:40px;color:var(--muted)">Loading…</div>`;
   overlay.style.display = 'flex';
@@ -1175,12 +1455,10 @@ async function _renderThread(threadId, itemId, silent = false) {
     if (data.error) { showToast('❌', data.error); closeMsgOverlay(); return; }
     const { messages, item } = data;
     const overlay = document.getElementById('msgOverlay'); if (!overlay) return;
-
     if (!silent) {
       const hasImg = item.image_path && item.image_path.trim() !== '';
       overlay.innerHTML = `
         <div style="display:flex;flex-direction:column;height:100%;max-width:560px;width:100%;margin:0 auto;background:var(--surface);border-radius:16px;overflow:hidden;border:1px solid var(--border);max-height:90vh;">
-          <!-- Header -->
           <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:var(--surface2);border-bottom:1px solid var(--border);flex-shrink:0;">
             <div style="width:40px;height:40px;border-radius:8px;flex-shrink:0;overflow:hidden;background:${item.type==='lost'?'rgba(247,95,95,.12)':'rgba(56,226,184,.1)'};display:flex;align-items:center;justify-content:center;font-size:1.2rem">
               ${hasImg?`<img src="${item.image_path}" style="width:100%;height:100%;object-fit:cover;" />`:(item.type==='lost'?'🔴':'🟢')}
@@ -1191,18 +1469,14 @@ async function _renderThread(threadId, itemId, silent = false) {
             </div>
             <button onclick="closeMsgOverlay()" style="background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text);font-size:.9rem;flex-shrink:0;">✕</button>
           </div>
-          <!-- Messages -->
           <div id="msgBubbleArea" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:0;">
             ${_renderBubbles(messages)}
           </div>
-          <!-- Input -->
           <div style="padding:12px 14px;border-top:1px solid var(--border);background:var(--surface2);flex-shrink:0;">
             <div style="display:flex;gap:8px;align-items:flex-end;">
-              <textarea id="msgInput"
-                placeholder="Type a message… (Enter to send)"
+              <textarea id="msgInput" placeholder="Type a message… (Enter to send)"
                 style="flex:1;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.25);border-radius:10px;color:var(--text);padding:10px 12px;font-size:.83rem;resize:none;min-height:44px;max-height:120px;outline:none;font-family:inherit;box-sizing:border-box;"
-                onkeydown="msgKeydown(event)"
-                rows="1"></textarea>
+                onkeydown="msgKeydown(event)" rows="1"></textarea>
               <button onclick="sendMsgReply()"
                 style="background:#4f8ef7;color:#fff;border:none;border-radius:10px;padding:10px 16px;cursor:pointer;font-weight:600;font-size:.83rem;height:44px;flex-shrink:0;white-space:nowrap;">
                 Send ↗
@@ -1218,7 +1492,6 @@ async function _renderThread(threadId, itemId, silent = false) {
         if (inp) inp.focus();
       });
     } else {
-      // Silent poll — only update bubble area
       const area = document.getElementById('msgBubbleArea');
       if (area) {
         const atBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
@@ -1237,8 +1510,7 @@ function _renderBubbles(messages) {
     const isMe = m.author === 'me';
     let ts = '';
     if (m.created_at) {
-      const d   = new Date(m.created_at.replace(' ','T'));
-      const now = new Date();
+      const d = new Date(m.created_at.replace(' ','T')), now = new Date();
       ts = d.toDateString() === now.toDateString()
         ? d.toTimeString().slice(0,5)
         : `${d.getDate()} ${d.toLocaleString('default',{month:'short'})} ${d.toTimeString().slice(0,5)}`;
@@ -1254,63 +1526,32 @@ function msgKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsgReply(); }
 }
 
-async function sendMsgReply() {
-  const inp  = document.getElementById('msgInput');
-  const body = (inp ? inp.value : '').trim();
-  if (!body || !_activeThreadId) return;
-  inp.value = '';
-  inp.style.height = '';
-  try {
-    const res  = await fetch('/api/messages/reply', {
-      method:  'POST',
-      headers: {'Content-Type':'application/json'},
-      body:    JSON.stringify({ thread_id: _activeThreadId, body }),
-    });
-    const data = await res.json();
-    if (data.ok) {
-      await _renderThread(_activeThreadId, _activeItemId, true);
-      const area = document.getElementById('msgBubbleArea');
-      if (area) area.scrollTop = area.scrollHeight;
-    } else {
-      showToast('❌', data.error || 'Failed to send.');
-      inp.value = body;
-    }
-  } catch(e) {
-    showToast('❌','Network error.');
-    inp.value = body;
-  }
-}
-
 function closeMsgOverlay() {
   clearInterval(_msgPollInterval);
-  _msgPollInterval = null;
-  _activeThreadId  = null;
-  _activeItemId    = null;
+  _msgPollInterval = null; _activeThreadId = null; _activeItemId = null;
   const o = document.getElementById('msgOverlay');
   if (o) { o.style.display='none'; o.innerHTML=''; }
   document.body.style.overflow = '';
   loadMessageThreads();
 }
 
-/* ─── Start a NEW thread from item card / detail panel ─── */
+function openNewMessageModal() {
+  showToast('💬', 'Browse items and tap "Send Message" to start a conversation!');
+}
+
 async function startMessageFromItem(itemId, itemTitle, ownerId) {
-  if (!window._loggedIn) { showToast('🔒','Please log in.'); return; }
-  if (ownerId === window._userId) { showToast('ℹ️','This is your own item.'); return; }
-
-  // If a thread already exists for this item, open it directly
+  if (!window._loggedIn)            { showToast('🔒','Please log in.');              return; }
+  if (window._userRole === 'admin') { showToast('🚫','Admins cannot send messages.'); return; }
+  if (ownerId === window._userId)   { showToast('ℹ️','This is your own item.');        return; }
   try {
-    const res     = await fetch('/api/messages/threads');
+    const res = await fetch('/api/messages/threads');
     const threads = await res.json();
-    const existing = threads.find(t => t.lf_item_id === itemId);
-    if (existing) {
-      closeDetail();
-      appView('messages', document.querySelector('[data-view="messages"]'));
-      setTimeout(() => openThread(existing.thread_id, itemId), 350);
-      return;
+    if (Array.isArray(threads)) {
+      const existing = threads.find(t => t.lf_item_id === itemId);
+      if (existing) { closeDetail(); openMsgDrawer({ threadId: existing.thread_id, itemId }); return; }
     }
-  } catch(e) { /* fall through to compose modal */ }
+  } catch(e) { /* fall through */ }
 
-  // No existing thread — show compose modal
   const modal = document.createElement('div');
   modal.id = 'newMsgModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px);padding:16px;box-sizing:border-box;';
@@ -1318,9 +1559,8 @@ async function startMessageFromItem(itemId, itemTitle, ownerId) {
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px 24px;max-width:440px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.5);">
       <div style="font-family:'Syne',sans-serif;font-size:1.05rem;font-weight:800;color:var(--text);margin-bottom:4px;">💬 Send Anonymous Message</div>
       <div style="font-size:.78rem;color:var(--muted2);margin-bottom:4px;">About: <strong>${escHtml(itemTitle)}</strong></div>
-      <div style="font-size:.71rem;color:var(--muted);margin-bottom:14px;display:flex;align-items:center;gap:5px;">🔒 Your identity will never be revealed to the other person.</div>
-      <textarea id="newMsgBody"
-        placeholder="Hi, I think I may have found your item…"
+      <div style="font-size:.71rem;color:var(--muted);margin-bottom:14px;">🔒 Your identity will never be revealed to the other person.</div>
+      <textarea id="newMsgBody" placeholder="Hi, I think I may have found your item…"
         style="width:100%;min-height:110px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.25);border-radius:10px;color:var(--text);padding:10px 12px;font-size:.84rem;resize:vertical;font-family:inherit;box-sizing:border-box;outline:none;"
         maxlength="1000"
         onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();submitNewMsg(${itemId});}"></textarea>
@@ -1333,34 +1573,33 @@ async function startMessageFromItem(itemId, itemTitle, ownerId) {
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
   const ta = document.getElementById('newMsgBody');
-  ta.focus();
-  ta.addEventListener('input', () => {
-    const c = document.getElementById('newMsgCount'); if (c) c.textContent = ta.value.length + ' / 1000';
-  });
+  if (ta) {
+    ta.focus();
+    ta.addEventListener('input', () => {
+      const c = document.getElementById('newMsgCount');
+      if (c) c.textContent = ta.value.length + ' / 1000';
+    });
+  }
 }
 
 async function submitNewMsg(itemId) {
-  const body = (document.getElementById('newMsgBody')?.value || '').trim();
+  const bodyEl = document.getElementById('newMsgBody');
+  const body   = (bodyEl?.value || '').trim();
   if (!body) { showToast('⚠️','Message cannot be empty.'); return; }
-
   const btn = document.getElementById('newMsgSendBtn');
   if (btn) { btn.disabled=true; btn.textContent='Sending…'; }
-
   try {
     const res  = await fetch('/api/messages/send', {
-      method:  'POST',
-      headers: {'Content-Type':'application/json'},
-      body:    JSON.stringify({ lf_item_id: itemId, body }),
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ lf_item_id: itemId, body }),
     });
     const data = await res.json();
     document.getElementById('newMsgModal')?.remove();
-
     if (data.ok) {
       showToast('📨','Message sent!');
       _pollNotificationBadge();
       closeDetail();
-      appView('messages', document.querySelector('[data-view="messages"]'));
-      setTimeout(() => openThread(data.thread_id, itemId), 350);
+      openMsgDrawer({ threadId: data.thread_id, itemId });
     } else {
       showToast('❌', data.error || 'Failed to send.');
       if (btn) { btn.disabled=false; btn.textContent='📨 Send Message'; }
@@ -1369,6 +1608,207 @@ async function submitNewMsg(itemId) {
     showToast('❌','Network error.');
     if (btn) { btn.disabled=false; btn.textContent='📨 Send Message'; }
   }
+}
+
+/* ═══════════════════════════════════════
+   GRIEVANCE DUPLICATE DETECTION (TF-IDF)
+═══════════════════════════════════════ */
+let _dupMatchedId = null;
+
+function _tfidfTokenize(text) {
+  return (text || '').toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2 && !['the','and','for','are','was','this','that','with','have','from','they','not','but','our','your','there'].includes(t));
+}
+
+function _tfidfScore(queryTokens, docText) {
+  const docTokens = _tfidfTokenize(docText);
+  if (!docTokens.length || !queryTokens.length) return 0;
+  const docSet = {};
+  docTokens.forEach(t => { docSet[t] = (docSet[t]||0) + 1; });
+  let matches = 0, totalWeight = 0;
+  queryTokens.forEach(t => {
+    totalWeight++;
+    if (docSet[t]) matches += Math.min(1, docSet[t] / docTokens.length * 10);
+  });
+  return totalWeight ? (matches / totalWeight) : 0;
+}
+
+async function checkGrievanceDuplicate() {
+  const subject = (document.getElementById('gSubject')?.value || '').trim();
+  const desc    = (document.getElementById('gDescription')?.value || '').trim();
+  if (!subject && !desc) { submitGrievanceAnyway(); return; }
+  const btn = document.getElementById('grvSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '🔍 Checking…'; }
+  document.getElementById('grvDuplicateWarn').style.display = 'none';
+  _dupMatchedId = null;
+  try {
+    const grievances = _allGrievances.length ? _allGrievances : await fetch('/api/grievances').then(r=>r.json());
+    const queryText   = subject + ' ' + desc;
+    const queryTokens = _tfidfTokenize(queryText);
+    let best = null, bestScore = 0;
+    grievances.forEach(g => {
+      if (g.status === 'resolved') return;
+      const gText = (g.subject || '') + ' ' + (g.description || '') + ' ' + (g.category || '');
+      const score = _tfidfScore(queryTokens, gText);
+      if (score > bestScore) { bestScore = score; best = g; }
+    });
+    const THRESHOLD = 0.42;
+    if (bestScore >= THRESHOLD && best) {
+      _dupMatchedId = best.id;
+      const grvRef  = `GRV-${String(best.id).padStart(4,'0')}`;
+      const preview = (best.subject || '').slice(0, 80);
+      document.getElementById('grvDuplicateText').innerHTML =
+        `<strong>${grvRef}:</strong> "${preview}" — <em>${best.category||'General'}</em> · ${best.vote_count||0} upvotes · Status: ${statusLabel(best.status)}`;
+      document.getElementById('grvDuplicateWarn').style.display = 'block';
+      document.getElementById('grvDuplicateWarn').scrollIntoView({behavior:'smooth', block:'nearest'});
+      if (btn) { btn.disabled = false; btn.textContent = '🚀 Submit Grievance'; }
+      return;
+    }
+    submitGrievanceAnyway();
+  } catch(e) { console.error('Duplicate check failed:', e); submitGrievanceAnyway(); }
+}
+
+function submitGrievanceAnyway() {
+  document.getElementById('grvDuplicateWarn').style.display = 'none';
+  const btn = document.getElementById('grvSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
+  const form = btn?.closest('form');
+  if (form) form.submit();
+}
+
+async function upvoteExistingGrievance() {
+  if (!_dupMatchedId) return;
+  try {
+    const res  = await fetch(`/api/grievance/${_dupMatchedId}/vote`, {method:'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      showToast('👍', `Upvoted GRV-${String(_dupMatchedId).padStart(4,'0')}!`);
+      document.getElementById('gSubject').value     = '';
+      document.getElementById('gDescription').value = '';
+      document.getElementById('grvDuplicateWarn').style.display = 'none';
+      _dupMatchedId = null;
+      appView('grievances', document.querySelector('[data-view="grievances"]'));
+      await loadAllGrievances();
+    } else { showToast('❌', data.error || 'Could not upvote.'); }
+  } catch(e) { showToast('❌','Network error.'); }
+}
+
+/* ═══════════════════════════════════════
+   STUDENT PROFILE
+═══════════════════════════════════════ */
+async function loadProfile() {
+  const av = document.getElementById('topbarProfileAvatar');
+  if (av && window._userName) av.textContent = window._userName[0].toUpperCase();
+  if (window._userRole !== 'student') return;
+  try {
+    const res  = await fetch('/api/profile');
+    const data = await res.json();
+    if (data.error) { showToast('❌', data.error); return; }
+    const initials = ((data.first_name||'?')[0] + (data.last_name||'')[0]).toUpperCase().replace(/undefined/g,'') || '?';
+    const av = document.getElementById('profileAvatar');      if (av) av.textContent = initials;
+    const fn = document.getElementById('profileFullName');    if (fn) fn.textContent = `${data.first_name||''} ${data.last_name||''}`.trim() || '—';
+    const em = document.getElementById('profileEmail');       if (em) em.textContent = data.email || '—';
+    const setVal = (id, v) => { const e = document.getElementById(id); if (e) e.value = v || ''; };
+    setVal('pfFirst', data.first_name); setVal('pfLast', data.last_name);
+    setVal('pfRoll',  data.roll);       setVal('pfDept', data.department);
+    ['pfCurrPw','pfNewPw','pfConfPw'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+    _hideMsg('profileInfoMsg'); _hideMsg('profilePwMsg');
+  } catch(e) { showToast('❌','Could not load profile.'); }
+}
+
+async function saveProfileInfo() {
+  const first = (document.getElementById('pfFirst')?.value || '').trim();
+  const last  = (document.getElementById('pfLast')?.value  || '').trim();
+  const roll  = (document.getElementById('pfRoll')?.value  || '').trim();
+  const dept  = (document.getElementById('pfDept')?.value  || '').trim();
+  if (!first) { _showMsg('profileInfoMsg', '❌ First name is required.', 'err'); return; }
+  const btn = document.getElementById('pfSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const res  = await fetch('/api/profile/update', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({first_name:first, last_name:last, roll, department:dept}),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window._userName = data.first_name;
+      const uname = document.querySelector('.u-name'); if (uname) uname.textContent = data.first_name;
+      const av = document.getElementById('profileAvatar');
+      if (av) av.textContent = ((first[0]||'') + (last[0]||'')).toUpperCase() || '?';
+      const fn = document.getElementById('profileFullName');
+      if (fn) fn.textContent = `${first} ${last}`.trim();
+      _showMsg('profileInfoMsg', '✅ Profile updated successfully!', 'ok');
+      showToast('✅', 'Profile saved!');
+    } else { _showMsg('profileInfoMsg', '❌ ' + (data.error || 'Update failed.'), 'err'); }
+  } catch(e) { _showMsg('profileInfoMsg', '❌ Network error.', 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '💾 Save Changes'; } }
+}
+
+async function saveProfilePassword() {
+  const curr = document.getElementById('pfCurrPw')?.value  || '';
+  const npw  = document.getElementById('pfNewPw')?.value   || '';
+  const conf = document.getElementById('pfConfPw')?.value  || '';
+  if (!curr || !npw || !conf) { _showMsg('profilePwMsg', '❌ All password fields are required.', 'err'); return; }
+  if (npw.length < 8)          { _showMsg('profilePwMsg', '❌ New password must be at least 8 characters.', 'err'); return; }
+  if (npw !== conf)             { _showMsg('profilePwMsg', '❌ New passwords do not match.', 'err'); return; }
+  const btn = document.getElementById('pfPwBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Updating…'; }
+  try {
+    const res  = await fetch('/api/profile/change_password', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({current_password:curr, new_password:npw, confirm_password:conf}),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      ['pfCurrPw','pfNewPw','pfConfPw'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+      const sf = document.getElementById('pwStrengthFill');  if (sf) sf.style.width = '0';
+      const sl = document.getElementById('pwStrengthLabel'); if (sl) sl.textContent = '';
+      _showMsg('profilePwMsg', '✅ Password changed successfully!', 'ok');
+      showToast('🔒', 'Password updated!');
+    } else { _showMsg('profilePwMsg', '❌ ' + (data.error || 'Failed to update password.'), 'err'); }
+  } catch(e) { _showMsg('profilePwMsg', '❌ Network error.', 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🔒 Update Password'; } }
+}
+
+function _showMsg(id, text, kind) {
+  const el = document.getElementById(id); if (!el) return;
+  el.textContent = text; el.style.display = 'block';
+  el.style.background   = kind === 'ok' ? 'rgba(56,226,184,.1)'  : 'rgba(247,95,95,.1)';
+  el.style.border       = kind === 'ok' ? '1px solid rgba(56,226,184,.3)' : '1px solid rgba(247,95,95,.3)';
+  el.style.color        = kind === 'ok' ? '#38e2b8' : '#f75f5f';
+  el.style.borderRadius = '8px';
+}
+function _hideMsg(id) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+
+function togglePwVis(inputId, btn) {
+  const inp = document.getElementById(inputId); if (!inp) return;
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.textContent = inp.type === 'password' ? '👁️' : '🙈';
+}
+
+function checkPwStrength(pw) {
+  const fill  = document.getElementById('pwStrengthFill');
+  const label = document.getElementById('pwStrengthLabel');
+  if (!fill || !label) return;
+  let score = 0;
+  if (pw.length >= 8)  score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw)) score++;
+  if (/[0-9]/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+  const levels = [
+    {pct:0,  color:'var(--border)', label:''},
+    {pct:20, color:'#f75f5f', label:'Weak'},
+    {pct:40, color:'#f7c34f', label:'Fair'},
+    {pct:65, color:'#f7c34f', label:'Good'},
+    {pct:85, color:'#38e2b8', label:'Strong'},
+    {pct:100,color:'#38e2b8', label:'Very strong'},
+  ];
+  const lvl = levels[Math.min(score, 5)];
+  fill.style.width = lvl.pct + '%'; fill.style.background = lvl.color;
+  label.textContent = lvl.label;    label.style.color     = lvl.color;
 }
 
 /* ═══════════════════════════════════════
@@ -1392,8 +1832,7 @@ function updateSteps() {
   ['sd1','sd2','sd3'].forEach((id,i) => {
     const el = document.getElementById(id); if (!el) return;
     el.classList.remove('done','cur');
-    if (i+1 < gStep)       el.classList.add('done');
-    else if (i+1 === gStep) el.classList.add('cur');
+    if (i+1 < gStep) el.classList.add('done'); else if (i+1 === gStep) el.classList.add('cur');
   });
   ['sl1','sl2'].forEach((id,i) => {
     const l = document.getElementById(id); if (!l) return;
@@ -1437,37 +1876,163 @@ function closeDetailEvt(e) {
    CHATBOT
 ═══════════════════════════════════════ */
 const chatHistory = [];
+let _chatBusy = false, _suggestionsLoaded = false;
+
+function initChatbot() {
+  const wrap = document.getElementById('chatMessages');
+  if (!wrap) return;
+  if (wrap.children.length > 0) { if (!_suggestionsLoaded) _loadSuggestions(); return; }
+  _appendChat('bot',
+    "Hi! 👋 I'm **CampusAI Assistant**.\n\n" +
+    "I can help you with:\n" +
+    "• **Grievances** — submit, track status, understand escalation\n" +
+    "• **Lost & Found** — report items, AI matching, anonymous messages\n" +
+    "• **Your data** — your personal grievances and L&F items\n" +
+    "• **Campus info** — policies, departments, contacts\n\n" +
+    "What do you need today?"
+  );
+  _loadSuggestions();
+}
+
+function _loadSuggestions() {
+  const wrap = document.getElementById('chatSuggestions');
+  if (!wrap) return;
+  fetch('/api/chat/suggestions')
+    .then(r => r.json())
+    .then(suggestions => {
+      if (!Array.isArray(suggestions) || !suggestions.length) return;
+      _suggestionsLoaded = true;
+      wrap.innerHTML = '';
+      suggestions.forEach(text => {
+        const btn = document.createElement('button');
+        btn.className = 'chat-chip'; btn.textContent = text;
+        btn.onclick = () => {
+          const inp = document.getElementById('chatInput');
+          if (inp) inp.value = text;
+          wrap.innerHTML = '';
+          sendChat();
+        };
+        wrap.appendChild(btn);
+      });
+    })
+    .catch(() => {});
+}
+
 function sendChat() {
   const inp = document.getElementById('chatInput');
-  const msg = inp.value.trim(); if (!msg) return;
+  const msg = (inp ? inp.value : '').trim();
+  if (!msg || _chatBusy) return;
   inp.value = '';
-  appendChat('user', msg);
-  chatHistory.push({role:'user', content: msg});
-  document.getElementById('chatTyping').style.display = 'flex';
-  setTimeout(() => {
-    const replies = [
-      "I'm looking into that for you! Check the Grievance section for updates.",
-      "Submit a new grievance using '✏️ Submit Grievance' in the sidebar.",
-      "For lost items, head to the Lost & Found section.",
-      "Expected resolution time is 2-3 working days.",
-      "The admin team reviews all submitted grievances.",
-      "Anything else I can help with?",
-    ];
-    const reply = replies[Math.floor(Math.random() * replies.length)];
-    document.getElementById('chatTyping').style.display = 'none';
-    appendChat('bot', reply);
-    chatHistory.push({role:'assistant', content: reply});
-  }, 1200);
+  const chipWrap = document.getElementById('chatSuggestions');
+  if (chipWrap) chipWrap.innerHTML = '';
+  _appendChat('user', msg);
+  chatHistory.push({ role: 'user', content: msg });
+  _setChatBusy(true);
+  fetch('/api/chat', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ messages: chatHistory }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      _setChatBusy(false);
+      if (data.ok && data.reply) {
+        _appendChat('bot', data.reply, data.engine, data.quick_action);
+        chatHistory.push({ role: 'assistant', content: data.reply });
+        if (chatHistory.length > 40) chatHistory.splice(0, chatHistory.length - 40);
+      } else { _appendChat('bot', '⚠️ Something went wrong. Please try again.'); }
+    })
+    .catch(err => {
+      _setChatBusy(false);
+      console.error('[chatbot]', err);
+      _appendChat('bot', '❌ Network error. Please check your connection and try again.');
+    });
 }
-function appendChat(role, text) {
-  const wrap = document.getElementById('chatMessages');
-  const div  = document.createElement('div');
-  div.className = role==='user' ? 'chat-msg chat-user' : 'chat-msg chat-bot';
-  div.innerHTML = `<div class="chat-bubble">${text}</div>`;
-  wrap.appendChild(div);
-  wrap.scrollTop = wrap.scrollHeight;
+
+function _appendChat(role, text, engine, quickAction) {
+  const wrap = document.getElementById('chatMessages'); if (!wrap) return;
+  const outer = document.createElement('div');
+  outer.className = role === 'user' ? 'chat-msg chat-user' : 'chat-msg chat-bot';
+  const safe = _renderChatMarkdown(text);
+  const badgeMap = {
+    gemini:   { icon:'✨', label:'Gemini',   cls:'badge-gemini' },
+    tfidf:    { icon:'🔍', label:'Local AI', cls:'badge-local'  },
+    fallback: { icon:'💬', label:'Basic',    cls:'badge-basic'  },
+  };
+  let badge = '';
+  if (role === 'bot' && engine && badgeMap[engine]) {
+    const b = badgeMap[engine];
+    badge = `<span class="chat-engine-badge ${b.cls}">${b.icon} ${b.label}</span>`;
+  }
+  let actionBtn = '';
+  if (role === 'bot' && quickAction?.label && quickAction?.target)
+    actionBtn = `<button class="chat-quick-action" onclick="openChatQuickAction('${_escAttr(quickAction.target)}')">${_escHtml(quickAction.label)}</button>`;
+  outer.innerHTML = `<div class="chat-bubble"><div class="chat-bubble-text">${safe}</div>${actionBtn}${badge}</div>`;
+  wrap.appendChild(outer);
+  requestAnimationFrame(() => wrap.scrollTo({ top: wrap.scrollHeight, behavior: 'smooth' }));
 }
-function chatKeydown(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }
+
+function _renderChatMarkdown(text) {
+  if (!text) return '';
+  let s = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  s = s.replace(/```[\s\S]*?```/g, m => {
+    const code = m.replace(/^```\w*\n?/,'').replace(/```$/,'');
+    return `<pre class="chat-code">${code}</pre>`;
+  });
+  s = s.replace(/`([^`]+)`/g,'<code class="chat-inline-code">$1</code>');
+  s = s.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  s = s.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  const lines = s.split('\n'), output = [];
+  let inList = false, listType = '';
+  lines.forEach(line => {
+    const bm = line.match(/^(\s*)[•\-\*]\s+(.+)/);
+    const nm = line.match(/^(\s*)\d+\.\s+(.+)/);
+    const blank = line.trim() === '';
+    if (bm) {
+      if (!inList || listType !== 'ul') { if (inList) output.push(`</${listType}>`); output.push('<ul class="chat-list">'); inList=true; listType='ul'; }
+      output.push(`<li>${bm[2]}</li>`);
+    } else if (nm) {
+      if (!inList || listType !== 'ol') { if (inList) output.push(`</${listType}>`); output.push('<ol class="chat-list">'); inList=true; listType='ol'; }
+      output.push(`<li>${nm[2]}</li>`);
+    } else {
+      if (inList) { output.push(`</${listType}>`); inList=false; listType=''; }
+      output.push(blank ? '<br>' : `<span class="chat-line">${line}</span><br>`);
+    }
+  });
+  if (inList) output.push(`</${listType}>`);
+  return output.join('');
+}
+
+function openChatQuickAction(viewTarget) {
+  if (typeof showView === 'function') { showView(viewTarget); return; }
+  const hashMap = {
+    grievanceView:'#grievance', myGrievancesView:'#my-grievances',
+    allGrievancesView:'#all-grievances', lostFoundView:'#lost-found',
+    messagesView:'#messages', analyticsView:'#analytics', notificationsView:'#notifications',
+  };
+  if (hashMap[viewTarget]) { window.location.hash = hashMap[viewTarget]; return; }
+  const navLink = document.querySelector(`[data-view="${viewTarget}"]`);
+  if (navLink) navLink.click();
+}
+
+function _setChatBusy(on) {
+  _chatBusy = on;
+  const typing = document.getElementById('chatTyping'); if (typing) typing.style.display = on ? 'flex' : 'none';
+  const btn = document.getElementById('chatSendBtn');
+  if (btn) { btn.disabled = on; btn.style.opacity = on ? '0.5' : '1'; }
+  const inp = document.getElementById('chatInput'); if (inp) inp.disabled = on;
+}
+function chatKeydown(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }
+function clearChatHistory() {
+  chatHistory.length = 0;
+  const wrap = document.getElementById('chatMessages'); if (wrap) wrap.innerHTML = '';
+  const chips = document.getElementById('chatSuggestions'); if (chips) chips.innerHTML = '';
+  _suggestionsLoaded = false;
+  initChatbot();
+}
+function _escHtml(str) {
+  return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _escAttr(str) { return (str||'').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
 
 /* ═══════════════════════════════════════
    AUTH HELPERS
@@ -1500,11 +2065,11 @@ function handleRegister() {
   const conf  = document.getElementById('rConfirm').value;
   const ok2   = document.getElementById('rAgree').checked;
   ['rFirstErr','rEmailErr','rPassErr','rConfErr','rAgreeErr'].forEach(id=>document.getElementById(id).classList.remove('show'));
-  if (!first)         { document.getElementById('rFirstErr').classList.add('show'); ok=false; }
+  if (!first)             { document.getElementById('rFirstErr').classList.add('show'); ok=false; }
   if (!validEmail(email)) { document.getElementById('rEmailErr').classList.add('show'); ok=false; }
-  if (pass.length<8)  { document.getElementById('rPassErr').classList.add('show');  ok=false; }
-  if (pass!==conf)    { document.getElementById('rConfErr').classList.add('show');  ok=false; }
-  if (!ok2)           { document.getElementById('rAgreeErr').classList.add('show'); ok=false; }
+  if (pass.length<8)      { document.getElementById('rPassErr').classList.add('show');  ok=false; }
+  if (pass!==conf)        { document.getElementById('rConfErr').classList.add('show');  ok=false; }
+  if (!ok2)               { document.getElementById('rAgreeErr').classList.add('show'); ok=false; }
   if (ok) document.getElementById('registerForm').submit();
 }
 
@@ -1527,6 +2092,61 @@ function showToast(icon, msg) {
 }
 
 /* ═══════════════════════════════════════
+   FORGOT PASSWORD
+═══════════════════════════════════════ */
+function openForgotPassword() {
+  const modal = document.getElementById('forgotPwModal'); if (!modal) return;
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  ['fpSuccBox','fpErrBox'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.display='none'; el.textContent=''; }
+  });
+  const emailErr = document.getElementById('fpEmailErr');
+  if (emailErr) emailErr.classList.remove('show');
+  const emailInp = document.getElementById('fpEmail');
+  const loginEmail = document.getElementById('lEmail');
+  if (emailInp && loginEmail) emailInp.value = loginEmail.value.trim();
+  if (emailInp) emailInp.focus();
+}
+function closeForgotPassword() {
+  const modal = document.getElementById('forgotPwModal');
+  if (modal) modal.style.display = 'none';
+  document.body.style.overflow = '';
+}
+async function sendForgotPassword() {
+  const emailInp = document.getElementById('fpEmail');
+  const email    = emailInp ? emailInp.value.trim() : '';
+  const emailErr = document.getElementById('fpEmailErr');
+  const succBox  = document.getElementById('fpSuccBox');
+  const errBox   = document.getElementById('fpErrBox');
+  if (emailErr) emailErr.classList.remove('show');
+  if (succBox)  { succBox.style.display='none'; succBox.textContent=''; }
+  if (errBox)   { errBox.style.display='none';  errBox.textContent=''; }
+  if (!validEmail(email)) { if (emailErr) emailErr.classList.add('show'); return; }
+  const btn = document.getElementById('fpSubmitBtn');
+  if (btn) { btn.disabled=true; btn.textContent='Sending…'; }
+  try {
+    const res  = await fetch('/api/forgot_password', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ email })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      _showBanner('fpSuccBox', '✅ Reset link sent! Check your email inbox.', 'succ');
+      if (emailInp) emailInp.disabled = true;
+      if (btn) { btn.disabled=true; btn.textContent='Sent ✓'; }
+    } else {
+      _showBanner('fpErrBox', `❌ ${data.error || 'Could not send reset link.'}`, 'err');
+      if (btn) { btn.disabled=false; btn.textContent='Send Reset Link →'; }
+    }
+  } catch(e) {
+    _showBanner('fpErrBox', '❌ Network error. Please try again.', 'err');
+    if (btn) { btn.disabled=false; btn.textContent='Send Reset Link →'; }
+  }
+}
+
+/* ═══════════════════════════════════════
    INIT
 ═══════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', () => {
@@ -1542,6 +2162,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (window._loggedIn) {
     _pollNotificationBadge();
     setInterval(_pollNotificationBadge, 30000);
+    const topAv = document.getElementById('topbarProfileAvatar');
+    if (topAv && window._userName) topAv.textContent = window._userName[0].toUpperCase();
   }
 
   if (window._loggedIn === true) {
