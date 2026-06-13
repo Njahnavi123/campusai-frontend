@@ -17,35 +17,14 @@ import urllib.error
 
 from flask import (
     Flask, render_template, request,
-    redirect, session, jsonify
+    redirect, session, jsonify, send_from_directory
 )
 
 # ── ML matcher (pure scikit-learn, no API key needed) ──────
 from matcher import find_matches, find_matches_for_item
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
-
-# ─── Initialize DB on startup (works with gunicorn too) ────
-with app.app_context():
-    from flask import g
-    import sqlite3 as _sqlite3
-
-  with app.app_context():
-    def _init():
-        import sqlite3 as _sq
-        db = os.environ.get("DATABASE_URL", "/tmp/campusai.db")
-        conn = _sq.connect(db)
-        cur = conn.cursor()
-        cur.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, first_name TEXT NOT NULL, last_name TEXT DEFAULT '', email TEXT UNIQUE NOT NULL, roll TEXT DEFAULT '', department TEXT DEFAULT '', password TEXT NOT NULL, role TEXT DEFAULT 'student')")
-        cur.execute("CREATE TABLE IF NOT EXISTS grievances (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT DEFAULT '', subject TEXT DEFAULT '', priority TEXT DEFAULT 'Medium', description TEXT DEFAULT '', location TEXT DEFAULT '', incident_date TEXT DEFAULT '', status TEXT DEFAULT 'pending', assigned_to TEXT DEFAULT '—', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        cur.execute("CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, grievance_id INTEGER, message TEXT, is_read INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        cur.execute("CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, grievance_id INTEGER NOT NULL, user_id INTEGER NOT NULL, body TEXT NOT NULL, is_admin INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        cur.execute("CREATE TABLE IF NOT EXISTS votes (id INTEGER PRIMARY KEY AUTOINCREMENT, grievance_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(grievance_id, user_id))")
-        cur.execute("CREATE TABLE IF NOT EXISTS lost_found (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL, category TEXT DEFAULT '', color TEXT DEFAULT '', brand TEXT DEFAULT '', description TEXT DEFAULT '', location TEXT DEFAULT '', date TEXT DEFAULT '', time TEXT DEFAULT '', image_path TEXT DEFAULT '', locker_number TEXT DEFAULT '', private INTEGER DEFAULT 0, status TEXT DEFAULT 'open', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        cur.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, sender_id INTEGER NOT NULL, receiver_id INTEGER NOT NULL, lf_item_id INTEGER, body TEXT NOT NULL, is_read INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        conn.commit()
-        conn.close()
-    _init()
 
 ADMIN_EMAIL    = "admin@campusai.edu"
 ADMIN_PASSWORD = "admin123"
@@ -69,149 +48,35 @@ CATEGORY_ASSIGNEES = {
 }
 ALL_ASSIGNEES = sorted({a for opts in CATEGORY_ASSIGNEES.values() for a in opts})
 
-UPLOAD_FOLDER = os.path.join("static", "uploads")
+UPLOAD_FOLDER = "/tmp/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ─── DB ────────────────────────────────────────────────────
 def get_db():
-    conn = sqlite3.connect("campusai.db")
+    db_path = os.environ.get("DATABASE_URL", "/tmp/campusai.db")
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
     conn = get_db()
-    cur  = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            first_name TEXT    NOT NULL,
-            last_name  TEXT    DEFAULT '',
-            email      TEXT    UNIQUE NOT NULL,
-            roll       TEXT    DEFAULT '',
-            department TEXT    DEFAULT '',
-            password   TEXT    NOT NULL,
-            role       TEXT    DEFAULT 'student'
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS grievances (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id       INTEGER NOT NULL,
-            category      TEXT    DEFAULT '',
-            subject       TEXT    DEFAULT '',
-            priority      TEXT    DEFAULT 'Medium',
-            description   TEXT    DEFAULT '',
-            location      TEXT    DEFAULT '',
-            incident_date TEXT    DEFAULT '',
-            status        TEXT    DEFAULT 'pending',
-            assigned_to   TEXT    DEFAULT '—',
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS notifications (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id      INTEGER,
-            grievance_id INTEGER,
-            message      TEXT,
-            is_read      INTEGER DEFAULT 0,
-            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id)      REFERENCES users(id),
-            FOREIGN KEY (grievance_id) REFERENCES grievances(id)
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS comments (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            grievance_id INTEGER NOT NULL,
-            user_id      INTEGER NOT NULL,
-            body         TEXT    NOT NULL,
-            is_admin     INTEGER DEFAULT 0,
-            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (grievance_id) REFERENCES grievances(id),
-            FOREIGN KEY (user_id)      REFERENCES users(id)
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS votes (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            grievance_id INTEGER NOT NULL,
-            user_id      INTEGER NOT NULL,
-            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(grievance_id, user_id),
-            FOREIGN KEY (grievance_id) REFERENCES grievances(id),
-            FOREIGN KEY (user_id)      REFERENCES users(id)
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS lost_found (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id       INTEGER NOT NULL,
-            type          TEXT    NOT NULL CHECK(type IN ('lost','found')),
-            title         TEXT    NOT NULL,
-            category      TEXT    DEFAULT '',
-            color         TEXT    DEFAULT '',
-            brand         TEXT    DEFAULT '',
-            description   TEXT    DEFAULT '',
-            location      TEXT    DEFAULT '',
-            date          TEXT    DEFAULT '',
-            time          TEXT    DEFAULT '',
-            image_path    TEXT    DEFAULT '',
-            locker_number TEXT    DEFAULT '',
-            private       INTEGER DEFAULT 0,
-            status        TEXT    DEFAULT 'open',
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            thread_id    TEXT    NOT NULL,
-            sender_id    INTEGER NOT NULL,
-            receiver_id  INTEGER NOT NULL,
-            lf_item_id   INTEGER,
-            body         TEXT    NOT NULL,
-            is_read      INTEGER DEFAULT 0,
-            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (sender_id)   REFERENCES users(id),
-            FOREIGN KEY (receiver_id) REFERENCES users(id),
-            FOREIGN KEY (lf_item_id)  REFERENCES lost_found(id)
-        )
-    """)
-
-    # ── Migrations ──────────────────────────────────────────
-    existing_grv = {row[1] for row in cur.execute("PRAGMA table_info(grievances)")}
-    for col, defn in [
-        ("priority",      "TEXT DEFAULT 'Medium'"),
-        ("location",      "TEXT DEFAULT ''"),
-        ("incident_date", "TEXT DEFAULT ''"),
-        ("status",        "TEXT DEFAULT 'pending'"),
-        ("assigned_to",   "TEXT DEFAULT '—'"),
-        ("created_at",    "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
-    ]:
-        if col not in existing_grv:
-            cur.execute(f"ALTER TABLE grievances ADD COLUMN {col} {defn}")
-
-    existing_usr = {row[1] for row in cur.execute("PRAGMA table_info(users)")}
-    for col, defn in [
-        ("last_name",  "TEXT DEFAULT ''"),
-        ("roll",       "TEXT DEFAULT ''"),
-        ("department", "TEXT DEFAULT ''"),
-        ("role",       "TEXT DEFAULT 'student'"),
-    ]:
-        if col not in existing_usr:
-            cur.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
-
-    existing_lf = {row[1] for row in cur.execute("PRAGMA table_info(lost_found)")}
-    if 'locker_number' not in existing_lf:
-        cur.execute("ALTER TABLE lost_found ADD COLUMN locker_number TEXT DEFAULT ''")
-
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, first_name TEXT NOT NULL, last_name TEXT DEFAULT '', email TEXT UNIQUE NOT NULL, roll TEXT DEFAULT '', department TEXT DEFAULT '', password TEXT NOT NULL, role TEXT DEFAULT 'student')")
+    cur.execute("CREATE TABLE IF NOT EXISTS grievances (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT DEFAULT '', subject TEXT DEFAULT '', priority TEXT DEFAULT 'Medium', description TEXT DEFAULT '', location TEXT DEFAULT '', incident_date TEXT DEFAULT '', status TEXT DEFAULT 'pending', assigned_to TEXT DEFAULT '—', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    cur.execute("CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, grievance_id INTEGER, message TEXT, is_read INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    cur.execute("CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, grievance_id INTEGER NOT NULL, user_id INTEGER NOT NULL, body TEXT NOT NULL, is_admin INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    cur.execute("CREATE TABLE IF NOT EXISTS votes (id INTEGER PRIMARY KEY AUTOINCREMENT, grievance_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(grievance_id, user_id))")
+    cur.execute("CREATE TABLE IF NOT EXISTS lost_found (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL, category TEXT DEFAULT '', color TEXT DEFAULT '', brand TEXT DEFAULT '', description TEXT DEFAULT '', location TEXT DEFAULT '', date TEXT DEFAULT '', time TEXT DEFAULT '', image_path TEXT DEFAULT '', locker_number TEXT DEFAULT '', private INTEGER DEFAULT 0, status TEXT DEFAULT 'open', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    cur.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, sender_id INTEGER NOT NULL, receiver_id INTEGER NOT NULL, lf_item_id INTEGER, body TEXT NOT NULL, is_read INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
     conn.commit()
     conn.close()
 
+init_db()
+
+# ─── Serve uploaded images ──────────────────────────────────
+@app.route('/uploads/<filename>')
+def serve_upload(filename):
+    return send_from_directory('/tmp/uploads', filename)
 
 # ─── Auto-escalation background thread ─────────────────────
 def auto_escalate_grievances():
@@ -381,11 +246,9 @@ def forgot_password():
         except Exception as e:
             conn.close()
             return jsonify(ok=False, error='Database error. Please try again.'), 500
-        # In production, email the link: /reset_password?token={token}
         print(f"[RESET] Password reset token for {email}: {token}")
 
     conn.close()
-    # Always respond ok to prevent email enumeration
     return jsonify(ok=True)
 
 
@@ -748,19 +611,12 @@ def api_analytics():
 # ══════════════════════════════════════════════════════════════
 
 def _make_thread_id(user_a, user_b, lf_item_id):
-    """Deterministic thread ID — same two users + same item always get same thread."""
     ids = sorted([int(user_a), int(user_b)])
     return f"lf{lf_item_id}-u{ids[0]}-u{ids[1]}"
 
 
 @app.route('/api/messages/send', methods=['POST'])
 def send_message():
-    """
-    Send the FIRST message about a lost/found item (creates the thread).
-    If a thread already exists between these two users for this item,
-    the message is added to the existing thread instead of creating a duplicate.
-    Body: { lf_item_id, body }
-    """
     if 'user_id' not in session:
         return jsonify({'error': 'Login required'}), 401
     if session.get('user_role') == 'admin':
@@ -818,7 +674,6 @@ def send_message():
 
 @app.route('/api/messages/reply', methods=['POST'])
 def reply_message():
-    """Send a reply within an existing thread. Body: { thread_id, body }"""
     if 'user_id' not in session:
         return jsonify({'error': 'Login required'}), 401
     if session.get('user_role') == 'admin':
@@ -876,7 +731,6 @@ def reply_message():
 
 @app.route('/api/messages/threads')
 def list_threads():
-    """List all message threads for the current user."""
     if 'user_id' not in session:
         return jsonify([])
 
@@ -907,7 +761,6 @@ def list_threads():
 
 @app.route('/api/messages/thread/<thread_id>')
 def get_thread(thread_id):
-    """Get all messages in a thread. Marks received messages as read."""
     if 'user_id' not in session:
         return jsonify({'error': 'Login required'}), 401
 
@@ -1015,7 +868,7 @@ def api_lf_submit():
             filepath = os.path.join(UPLOAD_FOLDER, filename)
             with open(filepath, 'wb') as f:
                 f.write(base64.b64decode(b64))
-            image_path = f"/static/uploads/{filename}"
+            image_path = f"/uploads/{filename}"
         except Exception as e:
             return jsonify({'error': f'Image save failed: {e}'}), 500
 
@@ -1039,7 +892,6 @@ def api_lf_submit():
     """, (new_id,))
     new_item = dict(cur.fetchone())
 
-    # ML matching
     opposite = 'found' if item_type == 'lost' else 'lost'
     cur.execute("SELECT * FROM lost_found WHERE type=? AND status='open'", (opposite,))
     candidates = _lf_rows_as_dicts(cur)
@@ -1302,7 +1154,6 @@ def api_chat():
 
     user_question = messages[-1].get('content', '').strip()
 
-    # ── Live DB stats ──────────────────────────────────────────
     conn = get_db(); cur = conn.cursor()
     cur.execute("SELECT COUNT(*) AS c FROM grievances WHERE status='pending'")
     stat_pending = cur.fetchone()['c']
@@ -1327,7 +1178,6 @@ def api_chat():
     user_name = session.get('user_name', 'Student')
     user_role = session.get('user_role', 'student')
 
-    # ── Try Gemini with retry on quota/busy errors ─────────────
     gemini_key = os.environ.get('GEMINI_API_KEY', '')
     if gemini_key:
         system_prompt = f"""You are CampusAI Assistant, a friendly AI built into a college campus management system.
@@ -1356,46 +1206,21 @@ RULES:
 - Politely redirect off-topic questions back to campus matters.
 """
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel(
-                model_name='gemini-1.5-flash',
-                system_instruction=system_prompt,
+            from google import genai
+            client = genai.Client(api_key=gemini_key)
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=user_question,
+                config={'system_instruction': system_prompt}
             )
-
-            # Build conversation history
-            history = []
-            for msg in messages[:-1]:
-                role = 'model' if msg['role'] == 'assistant' else 'user'
-                history.append({'role': role, 'parts': [msg['content']]})
-
-            # Retry up to 2 times on quota/busy errors
-            last_err = None
-            for attempt in range(2):
-                try:
-                    chat     = model.start_chat(history=history)
-                    response = chat.send_message(user_question)
-                    return jsonify({
-                        'ok':     True,
-                        'reply':  response.text.strip(),
-                        'engine': 'gemini'
-                    })
-                except Exception as e:
-                    last_err  = str(e).lower()
-                    # Only retry on quota/busy errors
-                    if any(x in last_err for x in ['quota', 'resource', '429', 'busy', 'exhausted']):
-                        if attempt == 0:
-                            _time.sleep(2)   # wait 2 seconds then retry once
-                        continue
-                    else:
-                        break   # non-quota error — don't retry, go to fallback
-
-            print(f'[chatbot] Gemini failed after retries: {last_err} — using local fallback')
-
+            return jsonify({
+                'ok':     True,
+                'reply':  response.text.strip(),
+                'engine': 'gemini'
+            })
         except Exception as e:
-            print(f'[chatbot] Gemini setup error: {e} — using local fallback')
+            print(f'[chatbot] Gemini error: {e} — using local fallback')
 
-    # ── Local fallback: TF-IDF + keyword rules ─────────────────
     return _local_chatbot(
         user_question,
         stat_pending, stat_resolved, stat_escalated,
@@ -1462,7 +1287,7 @@ _QA_PAIRS = [
 
     (["how many grievances", "total grievances", "stats", "pending count",
       "statistics", "dashboard"],
-     None),  # filled dynamically
+     None),
 
     (["hello", "hi", "hey", "good morning", "help me", "what can you do"],
      "Hi! 👋 I'm **CampusAI Assistant**. I can help with:\n• **Grievances** — submit, track, escalation\n• **Lost & Found** — report, AI matching, anonymous chat\n• **Campus info** — departments, locations, policies\n\nWhat do you need?"),
@@ -1501,7 +1326,6 @@ def _local_chatbot(question, pending, resolved, escalated, lost, found, claimed)
         qa_idx      = pair_index[best_ex_idx]
         answer      = _QA_PAIRS[qa_idx][1]
 
-        # Dynamic stats answer
         if answer is None:
             answer = (
                 f"**Live campus stats right now:**\n"
@@ -1521,6 +1345,8 @@ def _local_chatbot(question, pending, resolved, escalated, lost, found, claimed)
         "• *How does AI matching work?*\n"
         "• *How many pending grievances are there?*"
     ), 'engine': 'fallback'})
+
+
 # ─── LOGOUT ─────────────────────────────────────────────────
 @app.route('/logout')
 def logout():
@@ -1530,11 +1356,8 @@ def logout():
 
 
 if __name__ == '__main__':
-    init_db()
-
     escalator = threading.Thread(target=auto_escalate_grievances, daemon=True)
     escalator.start()
     print(f"[auto_escalate] Started — checking every {ESCALATION_CHECK_INTERVAL}s, "
           f"threshold={ESCALATION_DAYS} days")
-
     app.run(debug=True)
