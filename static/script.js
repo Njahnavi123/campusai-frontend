@@ -1186,17 +1186,31 @@ function confirmLFMatch(lostId, foundId, btn) {
   fetch('/api/lf/confirm_match',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lost_id:lostId,found_id:foundId})})
     .then(r=>r.json())
     .then(data => {
-      if (data.ok) { btn.textContent='✅ Confirmed'; showToast('✅','Match confirmed!'); setTimeout(()=>loadLFMatches(),800); }
+      if (data.ok) {
+        showToast('✅','Match confirmed!');
+        // Remove just this one card instead of reloading everything
+        const card = btn.closest('.match-pair');
+        if (card) {
+          card.style.transition = 'opacity .4s, transform .4s';
+          card.style.opacity = '0';
+          card.style.transform = 'translateX(30px)';
+          setTimeout(() => {
+            card.remove();
+            // Update the header count
+            const remaining = document.querySelectorAll('.match-pair').length;
+            const hdr = document.getElementById('matchesSubHdr');
+            if (hdr) hdr.textContent = `${remaining} match${remaining !== 1 ? 'es' : ''} found · Updated just now`;
+            if (remaining === 0) {
+              const container = document.getElementById('matchesList');
+              if (container) container.innerHTML = `<div style="text-align:center;padding:56px 20px;color:var(--muted)"><div style="font-size:3rem;margin-bottom:14px">🔍</div><div style="font-size:.95rem;font-weight:600;color:var(--text);margin-bottom:6px">No matches found yet</div><div style="font-size:.82rem;color:var(--muted2)">As more items are posted, AI will detect similarities.</div></div>`;
+            }
+          }, 400);
+        }
+      }
       else { btn.disabled=false; btn.textContent='✅ Confirm'; showToast('❌',data.error||'Failed.'); }
     })
     .catch(()=>{ btn.disabled=false; btn.textContent='✅ Confirm'; showToast('❌','Network error.'); });
 }
-function dismissLFMatch(btn) {
-  const card = btn.closest('.match-pair');
-  if (card) { card.style.transition='opacity .3s,transform .3s'; card.style.opacity='0'; card.style.transform='translateX(30px)'; setTimeout(()=>card.remove(),300); }
-  showToast('✕','Dismissed.');
-}
-
 /* ═══════════════════════════════════════
    ANONYMOUS MESSAGING SYSTEM
 ═══════════════════════════════════════ */

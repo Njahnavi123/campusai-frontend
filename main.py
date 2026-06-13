@@ -1081,9 +1081,9 @@ def api_lf_matches():
 
     min_score = int(request.args.get('min_score', 35))
     conn = get_db(); cur = conn.cursor()
-    cur.execute("SELECT * FROM lost_found WHERE type='lost'  AND status='open'")
+    cur.execute("SELECT * FROM lost_found WHERE type='lost'")
     lost_items  = _lf_rows_as_dicts(cur)
-    cur.execute("SELECT * FROM lost_found WHERE type='found' AND status='open'")
+    cur.execute("SELECT * FROM lost_found WHERE type='found'")
     found_items = _lf_rows_as_dicts(cur)
     conn.close()
 
