@@ -25,6 +25,8 @@ from matcher import find_matches, find_matches_for_item
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
+with app.app_context():
+    init_db()
 
 ADMIN_EMAIL    = "admin@campusai.edu"
 ADMIN_PASSWORD = "admin123"
