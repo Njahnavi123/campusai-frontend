@@ -22,11 +22,28 @@ from flask import (
 
 # ── ML matcher (pure scikit-learn, no API key needed) ──────
 from matcher import find_matches, find_matches_for_item
-
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
+
+# ─── Initialize DB on startup (works with gunicorn too) ────
 with app.app_context():
-    init_db()
+    from flask import g
+    import sqlite3 as _sqlite3
+
+    def _init():
+        conn = _sqlite3.connect("campusai.db")
+        conn.row_factory = _sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, first_name TEXT NOT NULL, last_name TEXT DEFAULT '', email TEXT UNIQUE NOT NULL, roll TEXT DEFAULT '', department TEXT DEFAULT '', password TEXT NOT NULL, role TEXT DEFAULT 'student')")
+        cur.execute("CREATE TABLE IF NOT EXISTS grievances (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT DEFAULT '', subject TEXT DEFAULT '', priority TEXT DEFAULT 'Medium', description TEXT DEFAULT '', location TEXT DEFAULT '', incident_date TEXT DEFAULT '', status TEXT DEFAULT 'pending', assigned_to TEXT DEFAULT '—', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        cur.execute("CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, grievance_id INTEGER, message TEXT, is_read INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        cur.execute("CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, grievance_id INTEGER NOT NULL, user_id INTEGER NOT NULL, body TEXT NOT NULL, is_admin INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        cur.execute("CREATE TABLE IF NOT EXISTS votes (id INTEGER PRIMARY KEY AUTOINCREMENT, grievance_id INTEGER NOT NULL, user_id INTEGER NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(grievance_id, user_id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS lost_found (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL, category TEXT DEFAULT '', color TEXT DEFAULT '', brand TEXT DEFAULT '', description TEXT DEFAULT '', location TEXT DEFAULT '', date TEXT DEFAULT '', time TEXT DEFAULT '', image_path TEXT DEFAULT '', locker_number TEXT DEFAULT '', private INTEGER DEFAULT 0, status TEXT DEFAULT 'open', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        cur.execute("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, sender_id INTEGER NOT NULL, receiver_id INTEGER NOT NULL, lf_item_id INTEGER, body TEXT NOT NULL, is_read INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        conn.commit()
+        conn.close()
+    _init()
 
 ADMIN_EMAIL    = "admin@campusai.edu"
 ADMIN_PASSWORD = "admin123"
